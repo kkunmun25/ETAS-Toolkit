@@ -1,0 +1,13 @@
+[project]
+name = "earthquake-etas-toolkit"
+version = "0.1.0"
+description = "Earthquake ETAS Toolkit"
+requires-python = ">=3.10"
+
+dependencies = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "scipy",
+    "requests"
+]
