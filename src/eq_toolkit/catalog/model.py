@@ -45,3 +45,41 @@ class Catalog:
 
     def load_parquet(self, filename):
         self.data = pd.read_parquet(filename)
+
+    @classmethod
+    def from_geojson(cls, data):
+        """
+        Create a Catalog from an FDSN GeoJSON response.
+        """
+
+        catalog = cls()
+
+        for feature in data["features"]:
+
+            properties = feature["properties"]
+            geometry = feature["geometry"]
+
+            coordinates = geometry["coordinates"]
+
+            catalog.add_event(
+                time=properties["time"],
+                latitude=coordinates[1],
+                longitude=coordinates[0],
+                depth=coordinates[2],
+                magnitude=properties["mag"],
+                magnitude_type=properties["magType"],
+                source_agency=properties["net"],
+                event_id=feature["id"],
+            )
+
+        return catalog
+
+    def merge(self, other):
+        """
+        Merge another Catalog into this one.
+        """
+        
+        self.data = pd.concat(
+          [self.data, other.data],
+          ignore_index=True
+        )
