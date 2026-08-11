@@ -11,7 +11,7 @@ from eq_toolkit.catalog.model import Catalog
 
 
 class KOERI:
-   
+    """KOERI earthquake catalogue scraper."""
 
     BASE_URL = "https://www.koeri.boun.edu.tr/sismo/2/en/"
 
@@ -19,22 +19,41 @@ class KOERI:
         pass
 
     def get_events(self, url=None):
-        
+        """
+        Download the KOERI earthquake catalogue.
+        """
 
         if url is None:
             url = self.BASE_URL
 
-        # Download the webpage
-        response = requests.get(url, timeout=30)
+        response = requests.get(
+            url,
+            timeout=30
+        )
+
         response.raise_for_status()
 
-        # Get webpage text
-        text = response.text
+        return self.parse(response.text)
 
-        print("KOERI page downloaded successfully.")
-        print(text[:1000])
+    def parse(self, text):
+        """
+        Parse KOERI catalogue text.
 
-        # Creating an empty dataframe with the standard Catalog columns
+        Parameters
+        ----------
+        text : str
+            Raw catalogue text.
+
+        Returns
+        -------
+        Catalog
+            Parsed earthquake catalogue.
+        """
+
+        print("Parsing KOERI data...")
+
+    
+
         columns = [
             "time",
             "latitude",
@@ -48,7 +67,6 @@ class KOERI:
 
         df = pd.DataFrame(columns=columns)
 
-        # Create Catalog
-        catalog = Catalog(df)
+        catalog = Catalog()
 
         return catalog

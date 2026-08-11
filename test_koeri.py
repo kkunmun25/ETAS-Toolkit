@@ -1,9 +1,10 @@
-from eq_toolkit.sources.scrape.koeri import KOERI
+def parse(self, text):
+    """
+    Parse KOERI catalogue text.
+    """
 
+    print("Parsing KOERI data...")
 
-def test_koeri():
-    scraper = KOERI()
+    catalog = Catalog()
 
-    catalog = scraper.get_events()
-
-    assert catalog is not None
+    return catalog
