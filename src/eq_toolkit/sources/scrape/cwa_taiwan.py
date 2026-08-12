@@ -23,8 +23,29 @@ class CWA_Taiwan:
     def __init__(self):
         self.source_agency = "CWA"
 
+    def _find_records(self, obj):
+        """Find earthquake records anywhere inside the JSON response."""
+
+        records = []
+
+        if isinstance(obj, dict):
+
+            if "OriginTime" in obj:
+                records.append(obj)
+
+            else:
+                for value in obj.values():
+                    records.extend(self._find_records(value))
+
+        elif isinstance(obj, list):
+
+            for item in obj:
+                records.extend(self._find_records(item))
+
+        return records
+
     def get_events(self, min_mag=None):
-        """Download and parse CWA earthquake catalog."""
+        """Download and return CWA earthquake events."""
 
         params = {
             "Authorization": "rdec-key-123-45678-011121314",
@@ -41,51 +62,67 @@ class CWA_Taiwan:
         response.raise_for_status()
 
         data = response.json()
-        # Extract records from response; structure may vary so try common keys
-        dataset = data.get("cwaopendata", {}).get("Dataset", {})
 
-        # dataset might be a list of records or a dict containing records under several possible keys
-        if isinstance(dataset, list):
-            records = dataset
-        elif isinstance(dataset, dict):
-            # try common keys
-            records = (
-                dataset.get("Records")
-                or dataset.get("Data")
-                or dataset.get("Record")
-                or dataset.get("dataset")
-                or []
-            )
-        else:
-            records = []
+        # Find earthquake records automatically
+        records = self._find_records(data)
 
         rows = []
+
         for event in records:
+
             try:
+                magnitude = float(event["LocalMagnitude"])
+
+                if min_mag is not None and magnitude < min_mag:
+                    continue
+
                 rows.append(
                     {
-                        "time": pd.to_datetime(event.get("OriginTime")),
-                        "latitude": float(event.get("EpicenterLatitude", "nan")),
-                        "longitude": float(event.get("EpicenterLongitude", "nan")),
-                        "depth": float(event.get("FocalDepth", "nan")),
-                        "magnitude": float(event.get("LocalMagnitude", "nan")),
-                        "magnitude_type": event.get("MagnitudeType", "ML"),
+                        "time": pd.to_datetime(
+                            event["OriginTime"]
+                        ),
+                        "latitude": float(
+                            event["EpicenterLatitude"]
+                        ),
+                        "longitude": float(
+                            event["EpicenterLongitude"]
+                        ),
+                        "depth": float(
+                            event["FocalDepth"]
+                        ),
+                        "magnitude": magnitude,
+                        "magnitude_type": "ML",
                         "source_agency": self.source_agency,
-                        "event_id": f"CWA-{event.get('OriginTime')}",
+                        "event_id": (
+                            f"CWA-{event['OriginTime']}"
+                        ),
                     }
                 )
-            except Exception:
-                # skip malformed records
+
+            except (KeyError, TypeError, ValueError):
                 continue
 
-        df = pd.DataFrame(rows)
+        df = pd.DataFrame(
+            rows,
+            columns=[
+                "time",
+                "latitude",
+                "longitude",
+                "depth",
+                "magnitude",
+                "magnitude_type",
+                "source_agency",
+                "event_id",
+            ],
+        )
 
-        if min_mag is not None and not df.empty:
-            df = df[df["magnitude"] >= min_mag]
+        print("Records found:", len(records))
+        print("Rows parsed:", len(df))
 
         catalog = Catalog()
 
         for _, row in df.iterrows():
+
             catalog.add_event(
                 time=row["time"],
                 latitude=row["latitude"],
@@ -101,7 +138,8 @@ class CWA_Taiwan:
 
 
 if __name__ == "__main__":
-    catalog = CWA_Taiwan().get_events(min_mag=4.0)
+
+    catalog = CWA_Taiwan().get_events()
 
     print("Number of events:", len(catalog.data))
-    print(catalog.data.head())  
+    print(catalog.data.head())
