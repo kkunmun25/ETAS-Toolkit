@@ -40,4 +40,11 @@ for i, magnitude in enumerate(magnitudes):
 plot_fmd(catalog)
 
 plt.tight_layout()
+
+plt.savefig(
+    "docs/figures/fmd_test.png",
+    dpi=300,
+    bbox_inches="tight",
+)
+
 plt.show()
