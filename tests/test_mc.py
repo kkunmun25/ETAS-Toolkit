@@ -1,7 +1,17 @@
 import numpy as np
-from eq_toolkit.quality.mc import (maxc,b_value,gft)
 
-# MAXC TEST
+from eq_toolkit.quality.mc import (
+    maxc,
+    b_value,
+    b_value_sigma,
+    gft,
+    mbs,
+)
+
+
+# =====================================================================
+# MAXC
+# =====================================================================
 
 def test_maxc():
 
@@ -28,7 +38,9 @@ def test_maxc():
     assert mc >= 2.3
 
 
-# B-VALUE TEST
+# =====================================================================
+# B-VALUE
+# =====================================================================
 
 def test_b_value():
 
@@ -51,14 +63,44 @@ def test_b_value():
         bin_width=0.1,
     )
 
-    # b-value must be positive
     assert b > 0
-
-    # It should be a finite number
     assert np.isfinite(b)
 
 
-# GFT TEST
+# =====================================================================
+# B-VALUE UNCERTAINTY
+# =====================================================================
+
+def test_b_value_sigma():
+
+    magnitudes = np.array([
+        2.5,
+        2.6,
+        2.7,
+        2.8,
+        3.0,
+        3.1,
+        3.2,
+        3.3,
+        3.5,
+        3.6,
+        3.7,
+        3.8,
+    ])
+
+    sigma = b_value_sigma(
+        magnitudes,
+        mc=2.5,
+        bin_width=0.1,
+    )
+
+    assert sigma > 0
+    assert np.isfinite(sigma)
+
+
+# =====================================================================
+# GFT
+# =====================================================================
 
 def test_gft():
 
@@ -81,8 +123,8 @@ def test_gft():
         3.2,
     ])
 
-
     try:
+
         mc = gft(
             magnitudes,
             bin_width=0.1,
@@ -92,12 +134,15 @@ def test_gft():
         assert np.isfinite(mc)
 
     except ValueError:
-        # A small catalog may legitimately fail the
-        # 95% and 90% criteria.
+
+        # Small catalog may fail both
+        # GFT thresholds.
         pass
 
 
-# SYNTHETIC CATALOG
+# =====================================================================
+# SYNTHETIC GR CATALOG
+# =====================================================================
 
 def _make_synthetic_gr_catalog(
     true_mc=2.5,
@@ -107,11 +152,7 @@ def _make_synthetic_gr_catalog(
 ):
     """
     Create a synthetic Gutenberg-Richter catalog
-    with a known Mc.
-
-    The cumulative number of earthquakes follows:
-
-        N(M) = N(Mc) * 10^[-b(M-Mc)]
+    with a known completeness magnitude.
     """
 
     magnitudes = []
@@ -122,8 +163,6 @@ def _make_synthetic_gr_catalog(
         bin_width,
     )
 
-    # Large starting number so that the synthetic
-    # catalog has a smooth GR distribution.
     n_mc = 10000
 
     cumulative = np.floor(
@@ -133,7 +172,9 @@ def _make_synthetic_gr_catalog(
         )
     ).astype(int)
 
-    for i, magnitude in enumerate(thresholds):
+    for i, magnitude in enumerate(
+        thresholds
+    ):
 
         if i + 1 < len(cumulative):
             next_count = cumulative[i + 1]
@@ -148,10 +189,14 @@ def _make_synthetic_gr_catalog(
             [magnitude] * number_in_bin
         )
 
-    return np.asarray(magnitudes)
+    return np.asarray(
+        magnitudes
+    )
 
 
-# GFT SYNTHETIC RECOVERY TEST
+# =====================================================================
+# GFT KNOWN-MC TEST
+# =====================================================================
 
 def test_gft_recovers_known_mc():
 
@@ -164,17 +209,22 @@ def test_gft_recovers_known_mc():
         bin_width=0.1,
     )
 
-    # Add incomplete / poorly represented
-    # smaller earthquakes below the true Mc.
     rng = np.random.default_rng(42)
 
     incomplete_events = np.round(
-        rng.uniform(1.0, 2.4, 300),
+        rng.uniform(
+            1.0,
+            2.4,
+            300,
+        ),
         1,
     )
 
     magnitudes = np.concatenate(
-        [incomplete_events, magnitudes]
+        [
+            incomplete_events,
+            magnitudes,
+        ]
     )
 
     estimated_mc = gft(
@@ -185,9 +235,57 @@ def test_gft_recovers_known_mc():
         min_events=50,
     )
 
-    # The known Mc should be recovered.
     assert np.isclose(
         estimated_mc,
         true_mc,
+        atol=0.1,
+    )
+
+
+# =====================================================================
+# MBS
+# =====================================================================
+
+def test_mbs():
+
+    magnitudes = _make_synthetic_gr_catalog(
+        true_mc=2.5,
+        b=1.0,
+        max_magnitude=5.0,
+        bin_width=0.1,
+    )
+
+    rng = np.random.default_rng(42)
+
+    incomplete_events = np.round(
+        rng.uniform(
+            1.0,
+            2.4,
+            300,
+        ),
+        1,
+    )
+
+    magnitudes = np.concatenate(
+        [
+            incomplete_events,
+            magnitudes,
+        ]
+    )
+
+    estimated_mc = mbs(
+        magnitudes,
+        bin_width=0.1,
+        window=0.5,
+        min_events=50,
+    )
+
+    assert np.isfinite(
+        estimated_mc
+    )
+
+    assert np.isclose(
+        estimated_mc,
+        2.5,
         atol=0.1,
     )
