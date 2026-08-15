@@ -1,40 +1,7 @@
-"""
-Magnitude of Completeness (Mc) estimation methods.
-
-Methods
--------
-MAXC
-    Maximum Curvature.
-
-GFT
-    Goodness-of-Fit Test.
-
-MBS
-    Magnitude of Completeness by b-value Stability.
-
-References
-----------
-Wiemer, S. & Wyss, M. (2000).
-Minimum magnitude of completeness in earthquake catalogs:
-examples from Alaska, the Western United States, and Japan.
-BSSA, 90(4), 859-869.
-
-Cao, A. & Gao, S. S. (2002).
-Temporal variations of seismic b-values beneath northeastern
-Japan island arc.
-Geophysical Research Letters, 29.
-
-Woessner, J. & Wiemer, S. (2005).
-Assessing the quality of earthquake catalogues:
-Estimating the magnitude of completeness and its uncertainty.
-BSSA, 95(2), 684-698.
-
-Shi, Y. & Bolt, B. A. (1982).
-The standard error of the magnitude-frequency b value.
-Bulletin of the Seismological Society of America.
-"""
-
 import numpy as np
+
+from scipy.special import erf
+from scipy.optimize import minimize
 
 
 # =====================================================================
@@ -167,29 +134,8 @@ def b_value_sigma(
 
     Shi & Bolt (1982):
 
-        sigma_b =
-            2.3 * b^2 *
-            sqrt(
-                sum((Mi - Mmean)^2)
-                /
-                [N * (N - 1)]
-            )
+        sigma_b = 2.3 * b^2 * sqrt(sum((Mi - Mmean)^2)/[N * (N - 1)])
 
-    Parameters
-    ----------
-    magnitudes : array-like
-        Earthquake magnitudes.
-
-    mc : float
-        Candidate magnitude of completeness.
-
-    bin_width : float, default=0.1
-        Magnitude bin width.
-
-    Returns
-    -------
-    float
-        Standard uncertainty of b.
     """
 
     magnitudes = np.asarray(
@@ -225,15 +171,7 @@ def b_value_sigma(
         (complete - mean_magnitude) ** 2
     )
 
-    sigma_b = (
-        2.3
-        * b**2
-        * np.sqrt(
-            squared_deviations
-            /
-            (n * (n - 1))
-        )
-    )
+    sigma_b = (2.3* b**2* np.sqrt( squared_deviations/(n * (n - 1))))
 
     return float(sigma_b)
 
@@ -480,37 +418,8 @@ def mbs(
     This follows the Woessner & Wiemer (2005)
     refinement of the Cao & Gao (2002) method.
 
-    The method:
 
-    1. Try different cutoff magnitudes Mco.
-    2. Calculate b(Mco).
-    3. Calculate sigma_b using Shi & Bolt (1982).
-    4. Calculate the average b-value in a window
-       beginning at Mco.
-    5. Select the first Mco for which:
 
-           |b(Mco) - b_average| <= sigma_b
-
-    Parameters
-    ----------
-    magnitudes : array-like
-        Earthquake magnitudes.
-
-    bin_width : float, default=0.1
-        Magnitude bin size.
-
-    window : float, default=0.5
-        Magnitude window used to calculate
-        the average b-value.
-
-    min_events : int, default=50
-        Minimum number of earthquakes required
-        above a candidate cutoff.
-
-    Returns
-    -------
-    float
-        Estimated magnitude of completeness.
     """
 
     magnitudes = np.asarray(
@@ -675,3 +584,461 @@ def mbs(
         "No stable b-value region found "
         "for the supplied catalog."
     )
+
+# =====================================================================
+# EMR DETECTION PROBABILITY
+# =====================================================================
+
+def emr_detection_probability(
+    magnitudes,
+    mc,
+    sigma,
+):
+    """
+    Calculate earthquake detection probability for EMR.
+
+    The detection probability follows a smooth error-function
+    transition from low detection probability at small magnitudes
+    to high detection probability at large magnitudes.
+
+    """
+
+    magnitudes = np.asarray(
+        magnitudes,
+        dtype=float,
+    )
+
+    if sigma <= 0:
+        raise ValueError(
+            "sigma must be positive."
+        )
+
+    probability = 0.5 * (
+        1.0
+        + erf(
+            (magnitudes - mc)
+            /
+            (np.sqrt(2.0) * sigma)
+        )
+    )
+
+    return probability
+
+# =====================================================================
+# EMR LOG-LIKELIHOOD
+# =====================================================================
+
+    """
+    Calculate the log-likelihood of an EMR model.
+
+    The observed magnitude distribution is modeled as:
+
+        f(M) ∝ 10^(-b M) * P_detection(M)
+
+    The model is normalized numerically over the observed
+    magnitude range.
+
+    """
+
+def emr_log_likelihood(
+    magnitudes,
+    b,
+    mc,
+    sigma,
+    bin_width=0.1,
+):
+    
+    magnitudes = np.asarray(
+        magnitudes,
+        dtype=float,
+    )
+
+    magnitudes = magnitudes[
+        np.isfinite(magnitudes)
+    ]
+
+    if len(magnitudes) == 0:
+        raise ValueError(
+            "No valid magnitudes supplied."
+        )
+
+    if b <= 0:
+        return -np.inf
+
+    if sigma <= 0:
+        return -np.inf
+
+    if bin_width <= 0:
+        raise ValueError(
+            "bin_width must be positive."
+        )
+
+    min_mag = np.min(magnitudes)
+    max_mag = np.max(magnitudes)
+
+    # Numerical integration grid
+    grid = np.arange(
+        min_mag,
+        max_mag + bin_width,
+        bin_width,
+    )
+
+    # Detection probability on grid
+    detection = emr_detection_probability(
+        grid,
+        mc=mc,
+        sigma=sigma,
+    )
+
+    # Gutenberg-Richter component
+    gr = 10.0 ** (
+        -b * grid
+    )
+
+    # Combined model
+    density = gr * detection
+
+    # Numerical normalization
+    normalization = np.trapezoid(
+        density,
+        grid,
+    )
+
+    if (
+        not np.isfinite(normalization)
+        or normalization <= 0
+    ):
+        return -np.inf
+
+    # Detection probability at observations
+    obs_detection = emr_detection_probability(
+        magnitudes,
+        mc=mc,
+        sigma=sigma,
+    )
+
+    if np.any(obs_detection <= 0):
+        return -np.inf
+
+    # Unnormalized GR density
+    obs_gr = 10.0 ** (
+        -b * magnitudes
+    )
+
+    probability = (
+        obs_gr
+        * obs_detection
+        / normalization
+    )
+
+    if np.any(probability <= 0):
+        return -np.inf
+
+    log_likelihood = np.sum(
+        np.log(probability)
+    )
+
+    return float(log_likelihood)
+
+# =====================================================================
+# EMR MAXIMUM-LIKELIHOOD ESTIMATION
+# =====================================================================
+
+def emr(
+    magnitudes,
+    bin_width=0.1,
+    min_events=50,
+):
+    """
+    Estimate Mc using the Entire Magnitude Range (EMR)
+    maximum-likelihood method.
+
+    """
+
+    magnitudes = np.asarray(
+        magnitudes,
+        dtype=float,
+    )
+
+    magnitudes = magnitudes[
+        np.isfinite(magnitudes)
+    ]
+
+    if len(magnitudes) < min_events:
+        raise ValueError(
+            "Not enough earthquakes for EMR estimation."
+        )
+
+    if bin_width <= 0:
+        raise ValueError(
+            "bin_width must be positive."
+        )
+
+    # ---------------------------------------------------------------
+    # Initial parameter estimates
+    # ---------------------------------------------------------------
+
+    initial_mc = np.median(
+        magnitudes
+    )
+
+    initial_b = 1.0
+
+    initial_sigma = 0.2
+
+    x0 = np.array([
+        initial_b,
+        initial_mc,
+        initial_sigma,
+    ])
+
+    # ---------------------------------------------------------------
+    # Parameter bounds
+    # ---------------------------------------------------------------
+
+    min_mag = np.min(
+        magnitudes
+    )
+
+    max_mag = np.max(
+        magnitudes
+    )
+
+    bounds = [
+        # b
+        (0.1, 3.0),
+
+        # Mc
+        (
+            min_mag,
+            max_mag,
+        ),
+
+        # sigma
+        (
+            0.02,
+            max(
+                0.5,
+                max_mag - min_mag,
+            ),
+        ),
+    ]
+
+    # Make sure initial Mc is inside bounds
+    initial_mc = np.clip(
+        initial_mc,
+        min_mag,
+        max_mag,
+    )
+
+    x0 = np.array([
+        initial_b,
+        initial_mc,
+        initial_sigma,
+    ])
+
+    # ---------------------------------------------------------------
+    # Objective function
+    # ---------------------------------------------------------------
+
+    def objective(parameters):
+
+        b, mc, sigma = parameters
+
+        likelihood = emr_log_likelihood(
+            magnitudes,
+            b=b,
+            mc=mc,
+            sigma=sigma,
+            bin_width=bin_width,
+        )
+
+        if not np.isfinite(
+            likelihood
+        ):
+            return 1e100
+
+        # Minimize negative log-likelihood
+        return -likelihood
+
+    # ---------------------------------------------------------------
+    # Optimization
+    # ---------------------------------------------------------------
+
+    result = minimize(
+        objective,
+        x0=x0,
+        bounds=bounds,
+        method="L-BFGS-B",
+    )
+
+    if not result.success:
+        raise ValueError(
+            "EMR maximum-likelihood optimization failed: "
+            + result.message
+        )
+
+    b_estimate = result.x[0]
+    mc_estimate = result.x[1]
+    sigma_estimate = result.x[2]
+
+    if not np.isfinite(
+        mc_estimate
+    ):
+        raise ValueError(
+            "EMR produced an invalid Mc."
+        )
+
+    return float(mc_estimate)
+
+# =====================================================================
+# EMR BOOTSTRAP UNCERTAINTY
+# =====================================================================
+
+def bootstrap_emr(
+    magnitudes,
+    n_bootstrap=100,
+    bin_width=0.1,
+    min_events=50,
+    random_state=None,
+):
+    """
+    Estimate EMR Mc and its bootstrap confidence interval.
+
+    Parameters
+    ----------
+    magnitudes : array-like
+        Earthquake magnitudes.
+
+    n_bootstrap : int, default=100
+        Number of bootstrap resamples.
+
+    bin_width : float, default=0.1
+        Magnitude bin width.
+
+    min_events : int, default=50
+        Minimum number of events required by EMR.
+
+    random_state : int or None
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+
+        mc
+            Original EMR estimate.
+
+        mc_lower
+            Lower 95% bootstrap confidence limit.
+
+        mc_upper
+            Upper 95% bootstrap confidence limit.
+
+        bootstrap_samples
+            All successful bootstrap Mc estimates.
+    """
+
+    magnitudes = np.asarray(
+        magnitudes,
+        dtype=float,
+    )
+
+    magnitudes = magnitudes[
+        np.isfinite(magnitudes)
+    ]
+
+    if len(magnitudes) < min_events:
+        raise ValueError(
+            "Not enough earthquakes for EMR bootstrap."
+        )
+
+    if n_bootstrap < 10:
+        raise ValueError(
+            "n_bootstrap must be at least 10."
+        )
+
+    # ---------------------------------------------------------------
+    # Original EMR estimate
+    # ---------------------------------------------------------------
+
+    original_mc = emr(
+        magnitudes,
+        bin_width=bin_width,
+        min_events=min_events,
+    )
+
+    # ---------------------------------------------------------------
+    # Random number generator
+    # ---------------------------------------------------------------
+
+    rng = np.random.default_rng(
+        random_state
+    )
+
+    bootstrap_samples = []
+
+    # ---------------------------------------------------------------
+    # Bootstrap loop
+    # ---------------------------------------------------------------
+
+    for _ in range(n_bootstrap):
+
+        # Sample earthquakes WITH replacement
+        sample = rng.choice(
+            magnitudes,
+            size=len(magnitudes),
+            replace=True,
+        )
+
+        try:
+
+            mc_bootstrap = emr(
+                sample,
+                bin_width=bin_width,
+                min_events=min_events,
+            )
+
+            if np.isfinite(
+                mc_bootstrap
+            ):
+                bootstrap_samples.append(
+                    mc_bootstrap
+                )
+
+        except ValueError:
+            # Some bootstrap samples may fail to
+            # converge. We simply skip those.
+            continue
+
+    bootstrap_samples = np.asarray(
+        bootstrap_samples,
+        dtype=float,
+    )
+
+    if len(bootstrap_samples) < 10:
+        raise ValueError(
+            "Too few successful bootstrap EMR estimates."
+        )
+
+    # ---------------------------------------------------------------
+    # 95% percentile confidence interval
+    # ---------------------------------------------------------------
+
+    lower = np.percentile(
+        bootstrap_samples,
+        2.5,
+    )
+
+    upper = np.percentile(
+        bootstrap_samples,
+        97.5,
+    )
+
+    return {
+        "mc": float(original_mc),
+        "mc_lower": float(lower),
+        "mc_upper": float(upper),
+        "bootstrap_samples": bootstrap_samples,
+    }

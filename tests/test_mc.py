@@ -6,6 +6,7 @@ from eq_toolkit.quality.mc import (
     b_value_sigma,
     gft,
     mbs,
+    emr,
 )
 
 
@@ -289,3 +290,215 @@ def test_mbs():
         2.5,
         atol=0.1,
     )
+
+# =====================================================================
+# EMR DETECTION PROBABILITY
+# =====================================================================
+
+def test_emr_detection_probability():
+
+    from eq_toolkit.quality.mc import (
+        emr_detection_probability,
+    )
+
+    magnitudes = np.array([
+        1.0,
+        2.0,
+        2.5,
+        3.0,
+        4.0,
+    ])
+
+    probability = emr_detection_probability(
+        magnitudes,
+        mc=2.5,
+        sigma=0.2,
+    )
+
+    # Same number of probabilities as magnitudes
+    assert len(probability) == len(
+        magnitudes
+    )
+
+    # Probabilities must be between 0 and 1
+    assert np.all(
+        probability >= 0.0
+    )
+
+    assert np.all(
+        probability <= 1.0
+    )
+
+    # Around Mc, probability should be ~0.5
+    assert np.isclose(
+        probability[2],
+        0.5,
+        atol=0.01,
+    )
+
+    # Larger magnitudes should have
+    # higher detection probability
+    assert (
+        probability[0]
+        < probability[-1]
+    )
+
+# =====================================================================
+# EMR LOG-LIKELIHOOD
+# =====================================================================
+
+def test_emr_log_likelihood():
+
+    from eq_toolkit.quality.mc import (
+        emr_log_likelihood,
+    )
+
+    magnitudes = np.array([
+        2.0,
+        2.1,
+        2.2,
+        2.3,
+        2.4,
+        2.5,
+        2.6,
+        2.7,
+        2.8,
+        3.0,
+        3.2,
+        3.5,
+    ])
+
+    likelihood = emr_log_likelihood(
+        magnitudes,
+        b=1.0,
+        mc=2.5,
+        sigma=0.2,
+    )
+
+    assert np.isfinite(
+        likelihood
+    )
+
+    assert likelihood < 0
+
+# =====================================================================
+# EMR MAXIMUM LIKELIHOOD
+# =====================================================================
+
+def test_emr():
+
+    magnitudes = _make_synthetic_gr_catalog(
+        true_mc=2.5,
+        b=1.0,
+        max_magnitude=5.0,
+        bin_width=0.1,
+    )
+
+    rng = np.random.default_rng(42)
+
+    incomplete_events = np.round(
+        rng.uniform(
+            1.0,
+            2.4,
+            300,
+        ),
+        1,
+    )
+
+    magnitudes = np.concatenate(
+        [
+            incomplete_events,
+            magnitudes,
+        ]
+    )
+
+    estimated_mc = emr(
+        magnitudes,
+        bin_width=0.1,
+        min_events=50,
+    )
+
+    assert np.isfinite(
+        estimated_mc
+    )
+
+    # EMR should recover approximately the
+    # known completeness magnitude.
+    assert np.isclose(
+        estimated_mc,
+        2.5,
+        atol=0.3,
+    )        
+
+# =====================================================================
+# EMR BOOTSTRAP
+# =====================================================================
+
+def test_bootstrap_emr():
+
+    from eq_toolkit.quality.mc import (
+        bootstrap_emr,
+    )
+
+    magnitudes = _make_synthetic_gr_catalog(
+        true_mc=2.5,
+        b=1.0,
+        max_magnitude=5.0,
+        bin_width=0.1,
+    )
+
+    rng = np.random.default_rng(42)
+
+    incomplete_events = np.round(
+        rng.uniform(
+            1.0,
+            2.4,
+            300,
+        ),
+        1,
+    )
+
+    magnitudes = np.concatenate(
+        [
+            incomplete_events,
+            magnitudes,
+        ]
+    )
+
+    result = bootstrap_emr(
+        magnitudes,
+        n_bootstrap=20,
+        bin_width=0.1,
+        min_events=50,
+        random_state=42,
+    )
+
+    # Required output fields
+    assert "mc" in result
+    assert "mc_lower" in result
+    assert "mc_upper" in result
+    assert "bootstrap_samples" in result
+
+    # All values must be finite
+    assert np.isfinite(
+        result["mc"]
+    )
+
+    assert np.isfinite(
+        result["mc_lower"]
+    )
+
+    assert np.isfinite(
+        result["mc_upper"]
+    )
+
+    # Confidence interval must be ordered
+    assert (
+        result["mc_lower"]
+        <= result["mc_upper"]
+    )
+
+    # Bootstrap should produce multiple estimates
+    assert len(
+        result["bootstrap_samples"]
+    ) >= 10
