@@ -7,6 +7,7 @@ from eq_toolkit.quality.mc import (
     gft,
     mbs,
     emr,
+    mbass,
 )
 
 
@@ -502,3 +503,308 @@ def test_bootstrap_emr():
     assert len(
         result["bootstrap_samples"]
     ) >= 10
+
+# =====================================================================
+# MBASS SEGMENT SLOPES
+# =====================================================================
+
+def test_mbass_segment_slopes():
+
+    from eq_toolkit.quality.mc import (
+        mbass_segment_slopes,
+    )
+
+    rng = np.random.default_rng(42)
+
+    magnitudes = np.round(
+        1.0
+        + rng.exponential(
+            scale=0.5,
+            size=500,
+        ),
+        1,
+    )
+
+    slope_magnitudes, slopes, counts = (
+        mbass_segment_slopes(
+            magnitudes,
+            bin_width=0.1,
+        )
+    )
+
+    assert len(
+        slope_magnitudes
+    ) == len(slopes)
+
+    assert len(
+        counts
+    ) > 0
+
+    assert np.all(
+        np.isfinite(slopes)
+    )
+
+# =====================================================================
+# MBASS CHANGE POINT
+# =====================================================================
+
+def test_mbass_change_point():
+
+    from eq_toolkit.quality.mc import (
+        mbass_change_point,
+    )
+
+    rng = np.random.default_rng(42)
+
+    # Two populations with clearly different
+    # median slopes.
+    left = rng.normal(
+        loc=0.3,
+        scale=0.03,
+        size=30,
+    )
+
+    right = rng.normal(
+        loc=1.0,
+        scale=0.03,
+        size=30,
+    )
+
+    slopes = np.concatenate(
+        [
+            left,
+            right,
+        ]
+    )
+
+    slope_magnitudes = np.arange(
+        len(slopes),
+        dtype=float,
+    ) * 0.1
+
+    result = mbass_change_point(
+        slope_magnitudes,
+        slopes,
+        alpha=0.05,
+    )
+
+    assert np.isfinite(
+        result["mc"]
+    )
+
+    assert result["p_value"] < 0.05
+
+    assert result["significant"]
+
+    # Change point should be near
+    # the middle of the slope sequence.
+    assert np.isclose(
+        result["mc"],
+        3.0,
+        atol=0.5,
+    )
+
+# =====================================================================
+# MBASS
+# =====================================================================
+
+def test_mbass():
+
+    rng = np.random.default_rng(42)
+
+    # ---------------------------------------------------------------
+    # Generate an incomplete low-magnitude population.
+    #
+    # This population is intentionally NOT Gutenberg-Richter-like.
+    # ---------------------------------------------------------------
+
+    low_magnitudes = rng.uniform(
+        1.0,
+        2.4,
+        size=1500,
+    )
+
+    low_magnitudes = np.round(
+        low_magnitudes,
+        1,
+    )
+
+    # ---------------------------------------------------------------
+    # Generate a clean Gutenberg-Richter-like population
+    # above the true completeness magnitude.
+    # ---------------------------------------------------------------
+
+    b = 1.0
+    mc_true = 2.5
+
+    # Exponential distribution corresponding to
+    # Gutenberg-Richter magnitudes.
+    high_magnitudes = (
+        mc_true
+        + rng.exponential(
+            scale=1.0 / (
+                b * np.log(10)
+            ),
+            size=5000,
+        )
+    )
+
+    high_magnitudes = np.round(
+        high_magnitudes,
+        1,
+    )
+
+    # Keep realistic magnitude range
+    high_magnitudes = high_magnitudes[
+        high_magnitudes <= 5.0
+    ]
+
+    magnitudes = np.concatenate(
+        [
+            low_magnitudes,
+            high_magnitudes,
+        ]
+    )
+
+    mc = mbass(
+        magnitudes,
+        bin_width=0.1,
+        alpha=0.05,
+    )
+
+    assert np.isfinite(mc)
+
+    assert 2.0 <= mc <= 3.0
+
+# =====================================================================
+# MBASS BOOTSTRAP
+# =====================================================================
+
+def test_bootstrap_mbass():
+
+    from eq_toolkit.quality.mc import (
+        bootstrap_mbass,
+    )
+
+    rng = np.random.default_rng(42)
+
+    # ---------------------------------------------------------------
+    # Create incomplete low-magnitude population
+    # ---------------------------------------------------------------
+
+    low_magnitudes = rng.uniform(
+        1.0,
+        2.4,
+        size=1500,
+    )
+
+    low_magnitudes = np.round(
+        low_magnitudes,
+        1,
+    )
+
+    # ---------------------------------------------------------------
+    # Create Gutenberg-Richter-like population above Mc
+    # ---------------------------------------------------------------
+
+    mc_true = 2.5
+    b = 1.0
+
+    high_magnitudes = (
+        mc_true
+        + rng.exponential(
+            scale=1.0 / (
+                b * np.log(10)
+            ),
+            size=5000,
+        )
+    )
+
+    high_magnitudes = np.round(
+        high_magnitudes,
+        1,
+    )
+
+    high_magnitudes = high_magnitudes[
+        high_magnitudes <= 5.0
+    ]
+
+    magnitudes = np.concatenate(
+        [
+            low_magnitudes,
+            high_magnitudes,
+        ]
+    )
+
+    # ---------------------------------------------------------------
+    # Run MBASS bootstrap
+    # ---------------------------------------------------------------
+
+    result = bootstrap_mbass(
+        magnitudes,
+        n_bootstrap=20,
+        bin_width=0.1,
+        alpha=0.05,
+        random_state=42,
+    )
+
+    # ---------------------------------------------------------------
+    # Check returned fields
+    # ---------------------------------------------------------------
+
+    assert "mc" in result
+    assert "mc_lower" in result
+    assert "mc_upper" in result
+    assert "bootstrap_samples" in result
+    assert "n_success" in result
+
+    # ---------------------------------------------------------------
+    # Check finite results
+    # ---------------------------------------------------------------
+
+    assert np.isfinite(
+        result["mc"]
+    )
+
+    assert np.isfinite(
+        result["mc_lower"]
+    )
+
+    assert np.isfinite(
+        result["mc_upper"]
+    )
+
+    # ---------------------------------------------------------------
+    # Confidence interval must be ordered
+    # ---------------------------------------------------------------
+
+    assert (
+        result["mc_lower"]
+        <= result["mc_upper"]
+    )
+
+    # ---------------------------------------------------------------
+    # At least 10 bootstrap runs should succeed
+    # ---------------------------------------------------------------
+
+    assert (
+        result["n_success"]
+        >= 10
+    )
+
+    assert (
+        len(
+            result["bootstrap_samples"]
+        )
+        == result["n_success"]
+    )
+
+    # ---------------------------------------------------------------
+    # Mc should remain in a reasonable range
+    # ---------------------------------------------------------------
+
+    assert (
+        1.5
+        <= result["mc"]
+        <= 3.5
+    )    

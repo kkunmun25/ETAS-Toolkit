@@ -2,6 +2,7 @@ import numpy as np
 
 from scipy.special import erf
 from scipy.optimize import minimize
+from scipy.stats import mannwhitneyu
 
 
 # =====================================================================
@@ -1041,4 +1042,562 @@ def bootstrap_emr(
         "mc_lower": float(lower),
         "mc_upper": float(upper),
         "bootstrap_samples": bootstrap_samples,
+    }
+
+# =====================================================================
+# MBASS - SEGMENT SLOPE
+# =====================================================================
+
+def mbass_segment_slopes(
+    magnitudes,
+    bin_width=0.1,
+):
+    """
+    Calculate the segment slopes of the non-cumulative
+    frequency-magnitude distribution (FMD).
+
+    For consecutive magnitude bins:
+
+        s(M) =
+            [log10(N_i) - log10(N_{i+1})]
+            / bin_width
+
+    where N_i is the number of earthquakes in a magnitude bin.
+
+    Parameters
+    ----------
+    magnitudes : array-like
+        Earthquake magnitudes.
+
+    bin_width : float, default=0.1
+        Magnitude bin width.
+
+    Returns
+    -------
+    bin_centers : numpy.ndarray
+        Magnitude associated with each slope.
+
+    slopes : numpy.ndarray
+        Segment slopes.
+
+    counts : numpy.ndarray
+        Incremental FMD counts.
+    """
+
+    magnitudes = np.asarray(
+        magnitudes,
+        dtype=float,
+    )
+
+    magnitudes = magnitudes[
+        np.isfinite(magnitudes)
+    ]
+
+    if len(magnitudes) < 3:
+        raise ValueError(
+            "At least three magnitudes are required."
+        )
+
+    if bin_width <= 0:
+        raise ValueError(
+            "bin_width must be positive."
+        )
+
+    # ---------------------------------------------------------------
+    # Construct magnitude bins
+    # ---------------------------------------------------------------
+
+    min_mag = (
+        np.floor(
+            magnitudes.min()
+            / bin_width
+        )
+        * bin_width
+    )
+
+    max_mag = (
+        np.ceil(
+            magnitudes.max()
+            / bin_width
+        )
+        * bin_width
+    )
+
+    edges = np.arange(
+        min_mag,
+        max_mag + bin_width,
+        bin_width,
+    )
+
+    counts, edges = np.histogram(
+        magnitudes,
+        bins=edges,
+    )
+
+    centers = (
+        edges[:-1]
+        + bin_width / 2.0
+    )
+
+    # ---------------------------------------------------------------
+    # Only adjacent bins with positive counts can be
+    # used because log10(0) is undefined.
+    # ---------------------------------------------------------------
+
+    valid = (
+        counts[:-1] > 0
+    ) & (
+        counts[1:] > 0
+    )
+
+    if np.sum(valid) < 3:
+        raise ValueError(
+            "Not enough populated adjacent magnitude bins "
+            "to calculate MBASS slopes."
+        )
+
+    left_counts = counts[:-1][valid]
+    right_counts = counts[1:][valid]
+
+    left_centers = centers[:-1][valid]
+    right_centers = centers[1:][valid]
+
+    slopes = (
+        np.log10(left_counts)
+        - np.log10(right_counts)
+    ) / (
+        right_centers
+        - left_centers
+    )
+
+    slope_centers = (
+        left_centers
+        + right_centers
+    ) / 2.0
+
+    return (
+        slope_centers.astype(float),
+        slopes.astype(float),
+        counts.astype(int),
+    )
+
+# =====================================================================
+# MBASS - CHANGE POINT
+# =====================================================================
+
+def mbass_change_point(
+    slope_magnitudes,
+    slopes,
+    alpha=0.05,
+):
+    """
+    Detect the main change point in the MBASS slope series.
+
+    The slope sequence is divided at every possible candidate
+    point. The two sides are compared using the
+    Wilcoxon-Mann-Whitney / Mann-Whitney U test.
+
+    The main discontinuity is the candidate with the smallest
+    p-value.
+
+    Parameters
+    ----------
+    slope_magnitudes : array-like
+        Magnitude associated with each segment slope.
+
+    slopes : array-like
+        Segment slope values.
+
+    alpha : float, default=0.05
+        Significance level.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+
+        mc
+            Main change-point magnitude.
+
+        p_value
+            Smallest WMW p-value.
+
+        statistic
+            Mann-Whitney U statistic.
+
+        significant
+            Whether the change point is statistically significant.
+
+        candidate_magnitudes
+            All candidate change-point magnitudes.
+
+        p_values
+            Corresponding p-values.
+    """
+
+    slope_magnitudes = np.asarray(
+        slope_magnitudes,
+        dtype=float,
+    )
+
+    slopes = np.asarray(
+        slopes,
+        dtype=float,
+    )
+
+    valid = (
+        np.isfinite(
+            slope_magnitudes
+        )
+        &
+        np.isfinite(slopes)
+    )
+
+    slope_magnitudes = (
+        slope_magnitudes[valid]
+    )
+
+    slopes = slopes[valid]
+
+    if len(slopes) < 5:
+        raise ValueError(
+            "At least five segment slopes are required "
+            "for change-point detection."
+        )
+
+    if not 0 < alpha < 1:
+        raise ValueError(
+            "alpha must be between 0 and 1."
+        )
+
+    candidate_magnitudes = []
+    p_values = []
+    statistics = []
+
+    # ---------------------------------------------------------------
+    # Try every interior split
+    # ---------------------------------------------------------------
+
+    for i in range(
+        2,
+        len(slopes) - 2,
+    ):
+
+        left = slopes[:i]
+        right = slopes[i:]
+
+        if len(left) < 2:
+            continue
+
+        if len(right) < 2:
+            continue
+
+        result = mannwhitneyu(
+            left,
+            right,
+            alternative="two-sided",
+            method="auto",
+        )
+
+        candidate_magnitudes.append(
+            slope_magnitudes[i]
+        )
+
+        statistics.append(
+            float(result.statistic)
+        )
+
+        p_values.append(
+            float(result.pvalue)
+        )
+
+    if len(p_values) == 0:
+        raise ValueError(
+            "Unable to identify MBASS change-point candidates."
+        )
+
+    p_values = np.asarray(
+        p_values,
+        dtype=float,
+    )
+
+    candidate_magnitudes = np.asarray(
+        candidate_magnitudes,
+        dtype=float,
+    )
+
+    statistics = np.asarray(
+        statistics,
+        dtype=float,
+    )
+
+    # ---------------------------------------------------------------
+    # Main discontinuity = smallest p-value
+    # ---------------------------------------------------------------
+
+    best_index = np.argmin(
+        p_values
+    )
+
+    mc = candidate_magnitudes[
+        best_index
+    ]
+
+    best_p = p_values[
+        best_index
+    ]
+
+    best_statistic = statistics[
+        best_index
+    ]
+
+    return {
+        "mc": float(mc),
+        "p_value": float(best_p),
+        "statistic": float(
+            best_statistic
+        ),
+        "significant": bool(
+            best_p < alpha
+        ),
+        "candidate_magnitudes":
+            candidate_magnitudes,
+        "p_values":
+            p_values,
+    }
+
+# =====================================================================
+# MBASS
+# =====================================================================
+
+def mbass(
+    magnitudes,
+    bin_width=0.1,
+    alpha=0.05,
+):
+    """
+    Estimate magnitude of completeness using MBASS.
+
+    MBASS (Median-Based Analysis of the Segment Slope)
+    detects significant changes in the slope of the
+    non-cumulative frequency-magnitude distribution.
+
+    The main discontinuity is selected as the magnitude
+    corresponding to the smallest probability from the
+    Wilcoxon-Mann-Whitney change-point test.
+
+    Parameters
+    ----------
+    magnitudes : array-like
+        Earthquake magnitudes.
+
+    bin_width : float, default=0.1
+        Magnitude bin width.
+
+    alpha : float, default=0.05
+        Significance level for the WMW test.
+
+    Returns
+    -------
+    float
+        Estimated magnitude of completeness.
+    """
+
+    slope_magnitudes, slopes, _ = (
+        mbass_segment_slopes(
+            magnitudes,
+            bin_width=bin_width,
+        )
+    )
+
+    result = mbass_change_point(
+        slope_magnitudes,
+        slopes,
+        alpha=alpha,
+    )
+
+    if not result["significant"]:
+        raise ValueError(
+            "MBASS did not detect a statistically "
+            "significant slope change."
+        )
+
+    return float(
+        result["mc"]
+    )
+
+# =====================================================================
+# MBASS BOOTSTRAP
+# =====================================================================
+
+def bootstrap_mbass(
+    magnitudes,
+    n_bootstrap=100,
+    bin_width=0.1,
+    alpha=0.05,
+    random_state=None,
+):
+    """
+    Estimate MBASS Mc and bootstrap confidence intervals.
+
+    The catalog is resampled with replacement and MBASS is
+    recalculated for every bootstrap sample.
+
+    Parameters
+    ----------
+    magnitudes : array-like
+        Earthquake magnitudes.
+
+    n_bootstrap : int, default=100
+        Number of bootstrap resamples.
+
+    bin_width : float, default=0.1
+        Magnitude bin width used by MBASS.
+
+    alpha : float, default=0.05
+        Significance level used by MBASS.
+
+    random_state : int or None
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+
+        mc
+            MBASS estimate from the original catalog.
+
+        mc_lower
+            Lower bootstrap confidence limit.
+
+        mc_upper
+            Upper bootstrap confidence limit.
+
+        bootstrap_samples
+            Successful bootstrap Mc estimates.
+
+        n_success
+            Number of successful bootstrap estimates.
+    """
+
+    # ---------------------------------------------------------------
+    # Validate input
+    # ---------------------------------------------------------------
+
+    magnitudes = np.asarray(
+        magnitudes,
+        dtype=float,
+    )
+
+    magnitudes = magnitudes[
+        np.isfinite(magnitudes)
+    ]
+
+    if len(magnitudes) < 10:
+        raise ValueError(
+            "Not enough valid magnitudes for MBASS bootstrap."
+        )
+
+    if n_bootstrap < 10:
+        raise ValueError(
+            "n_bootstrap must be at least 10."
+        )
+
+    if bin_width <= 0:
+        raise ValueError(
+            "bin_width must be positive."
+        )
+
+    if not 0 < alpha < 1:
+        raise ValueError(
+            "alpha must be between 0 and 1."
+        )
+
+    # ---------------------------------------------------------------
+    # Calculate MBASS for the original catalog
+    # ---------------------------------------------------------------
+
+    original_mc = mbass(
+        magnitudes,
+        bin_width=bin_width,
+        alpha=alpha,
+    )
+
+    # ---------------------------------------------------------------
+    # Random number generator
+    # ---------------------------------------------------------------
+
+    rng = np.random.default_rng(
+        random_state
+    )
+
+    bootstrap_samples = []
+
+    # ---------------------------------------------------------------
+    # Bootstrap resampling
+    # ---------------------------------------------------------------
+
+    for _ in range(n_bootstrap):
+
+        # Sample earthquakes WITH replacement
+        sample = rng.choice(
+            magnitudes,
+            size=len(magnitudes),
+            replace=True,
+        )
+
+        try:
+
+            mc_bootstrap = mbass(
+                sample,
+                bin_width=bin_width,
+                alpha=alpha,
+            )
+
+            if np.isfinite(
+                mc_bootstrap
+            ):
+                bootstrap_samples.append(
+                    mc_bootstrap
+                )
+
+        except ValueError:
+            # A bootstrap sample may occasionally fail to
+            # produce a statistically significant MBASS
+            # change point. Skip that sample.
+            continue
+
+    bootstrap_samples = np.asarray(
+        bootstrap_samples,
+        dtype=float,
+    )
+
+    if len(bootstrap_samples) < 10:
+        raise ValueError(
+            "Too few successful MBASS bootstrap estimates."
+        )
+
+    # ---------------------------------------------------------------
+    # 95% percentile confidence interval
+    # ---------------------------------------------------------------
+
+    lower = np.percentile(
+        bootstrap_samples,
+        2.5,
+    )
+
+    upper = np.percentile(
+        bootstrap_samples,
+        97.5,
+    )
+
+    return {
+        "mc": float(original_mc),
+        "mc_lower": float(lower),
+        "mc_upper": float(upper),
+        "bootstrap_samples": bootstrap_samples,
+        "n_success": int(
+            len(bootstrap_samples)
+        ),
     }

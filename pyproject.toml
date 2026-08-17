@@ -9,5 +9,6 @@ dependencies = [
     "pandas",
     "matplotlib",
     "scipy",
-    "requests"
+    "requests",
+    "seismostats==1.0.1"
 ]
