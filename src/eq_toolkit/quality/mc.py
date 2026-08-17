@@ -5,9 +5,7 @@ from scipy.optimize import minimize
 from scipy.stats import mannwhitneyu
 
 
-# =====================================================================
 # MAXC
-# =====================================================================
 
 def maxc(magnitudes, bin_width=0.1):
     """
@@ -62,9 +60,8 @@ def maxc(magnitudes, bin_width=0.1):
     return float(mc)
 
 
-# =====================================================================
 # B-VALUE
-# =====================================================================
+
 
 def b_value(magnitudes, mc, bin_width=0.1):
     """
@@ -121,9 +118,8 @@ def b_value(magnitudes, mc, bin_width=0.1):
     return float(b)
 
 
-# =====================================================================
 # B-VALUE UNCERTAINTY
-# =====================================================================
+
 
 def b_value_sigma(
     magnitudes,
@@ -177,9 +173,9 @@ def b_value_sigma(
     return float(sigma_b)
 
 
-# =====================================================================
+
 # GFT INTERNAL FUNCTION
-# =====================================================================
+
 
 def _gft_score(
     magnitudes,
@@ -271,9 +267,8 @@ def _gft_score(
     )
 
 
-# =====================================================================
 # GFT
-# =====================================================================
+
 
 def gft(
     magnitudes,
@@ -372,9 +367,9 @@ def gft(
             if goodness >= min_fit * 100.0:
                 return float(candidate)
 
-    # ---------------------------------------------------------------
+  
     # 90% fallback
-    # ---------------------------------------------------------------
+   
 
     for candidate in candidates:
 
@@ -402,9 +397,8 @@ def gft(
     )
 
 
-# =====================================================================
 # MBS
-# =====================================================================
+
 
 def mbs(
     magnitudes,
@@ -452,9 +446,9 @@ def mbs(
             "min_events must be at least 2."
         )
 
-    # ---------------------------------------------------------------
+   
     # Candidate cutoff magnitudes
-    # ---------------------------------------------------------------
+   
 
     min_mag = (
         np.floor(
@@ -483,9 +477,8 @@ def mbs(
         10,
     )
 
-    # ---------------------------------------------------------------
     # Calculate b-values for all usable candidates
-    # ---------------------------------------------------------------
+
 
     b_values = {}
     b_sigmas = {}
@@ -539,9 +532,9 @@ def mbs(
         b_values.keys()
     )
 
-    # ---------------------------------------------------------------
+
     # Search for the stable b-value region
-    # ---------------------------------------------------------------
+
 
     for candidate in candidate_values:
 
@@ -558,8 +551,7 @@ def mbs(
             )
         ]
 
-        # We need at least two b-values
-        # to define a local average.
+        
         if len(window_b_values) < 2:
             continue
 
@@ -576,7 +568,7 @@ def mbs(
             candidate
         ]
 
-        # Woessner & Wiemer stability criterion
+    
         if difference <= sigma_b:
 
             return float(candidate)
@@ -586,9 +578,8 @@ def mbs(
         "for the supplied catalog."
     )
 
-# =====================================================================
+
 # EMR DETECTION PROBABILITY
-# =====================================================================
 
 def emr_detection_probability(
     magnitudes,
@@ -625,9 +616,9 @@ def emr_detection_probability(
 
     return probability
 
-# =====================================================================
+
 # EMR LOG-LIKELIHOOD
-# =====================================================================
+
 
     """
     Calculate the log-likelihood of an EMR model.
@@ -741,9 +732,8 @@ def emr_log_likelihood(
 
     return float(log_likelihood)
 
-# =====================================================================
 # EMR MAXIMUM-LIKELIHOOD ESTIMATION
-# =====================================================================
+
 
 def emr(
     magnitudes,
@@ -775,9 +765,8 @@ def emr(
             "bin_width must be positive."
         )
 
-    # ---------------------------------------------------------------
     # Initial parameter estimates
-    # ---------------------------------------------------------------
+    
 
     initial_mc = np.median(
         magnitudes
@@ -793,9 +782,7 @@ def emr(
         initial_sigma,
     ])
 
-    # ---------------------------------------------------------------
     # Parameter bounds
-    # ---------------------------------------------------------------
 
     min_mag = np.min(
         magnitudes
@@ -838,9 +825,8 @@ def emr(
         initial_sigma,
     ])
 
-    # ---------------------------------------------------------------
     # Objective function
-    # ---------------------------------------------------------------
+ 
 
     def objective(parameters):
 
@@ -862,9 +848,8 @@ def emr(
         # Minimize negative log-likelihood
         return -likelihood
 
-    # ---------------------------------------------------------------
     # Optimization
-    # ---------------------------------------------------------------
+ 
 
     result = minimize(
         objective,
@@ -892,9 +877,8 @@ def emr(
 
     return float(mc_estimate)
 
-# =====================================================================
 # EMR BOOTSTRAP UNCERTAINTY
-# =====================================================================
+
 
 def bootstrap_emr(
     magnitudes,
@@ -906,39 +890,7 @@ def bootstrap_emr(
     """
     Estimate EMR Mc and its bootstrap confidence interval.
 
-    Parameters
-    ----------
-    magnitudes : array-like
-        Earthquake magnitudes.
-
-    n_bootstrap : int, default=100
-        Number of bootstrap resamples.
-
-    bin_width : float, default=0.1
-        Magnitude bin width.
-
-    min_events : int, default=50
-        Minimum number of events required by EMR.
-
-    random_state : int or None
-        Random seed for reproducibility.
-
-    Returns
-    -------
-    dict
-        Dictionary containing:
-
-        mc
-            Original EMR estimate.
-
-        mc_lower
-            Lower 95% bootstrap confidence limit.
-
-        mc_upper
-            Upper 95% bootstrap confidence limit.
-
-        bootstrap_samples
-            All successful bootstrap Mc estimates.
+ 
     """
 
     magnitudes = np.asarray(
@@ -960,9 +912,9 @@ def bootstrap_emr(
             "n_bootstrap must be at least 10."
         )
 
-    # ---------------------------------------------------------------
+    
     # Original EMR estimate
-    # ---------------------------------------------------------------
+
 
     original_mc = emr(
         magnitudes,
@@ -970,19 +922,17 @@ def bootstrap_emr(
         min_events=min_events,
     )
 
-    # ---------------------------------------------------------------
+    
     # Random number generator
-    # ---------------------------------------------------------------
+    
 
     rng = np.random.default_rng(
         random_state
     )
 
     bootstrap_samples = []
-
-    # ---------------------------------------------------------------
     # Bootstrap loop
-    # ---------------------------------------------------------------
+  
 
     for _ in range(n_bootstrap):
 
@@ -1009,8 +959,6 @@ def bootstrap_emr(
                 )
 
         except ValueError:
-            # Some bootstrap samples may fail to
-            # converge. We simply skip those.
             continue
 
     bootstrap_samples = np.asarray(
@@ -1023,9 +971,8 @@ def bootstrap_emr(
             "Too few successful bootstrap EMR estimates."
         )
 
-    # ---------------------------------------------------------------
     # 95% percentile confidence interval
-    # ---------------------------------------------------------------
+   
 
     lower = np.percentile(
         bootstrap_samples,
@@ -1044,9 +991,8 @@ def bootstrap_emr(
         "bootstrap_samples": bootstrap_samples,
     }
 
-# =====================================================================
 # MBASS - SEGMENT SLOPE
-# =====================================================================
+
 
 def mbass_segment_slopes(
     magnitudes,
@@ -1064,24 +1010,7 @@ def mbass_segment_slopes(
 
     where N_i is the number of earthquakes in a magnitude bin.
 
-    Parameters
-    ----------
-    magnitudes : array-like
-        Earthquake magnitudes.
 
-    bin_width : float, default=0.1
-        Magnitude bin width.
-
-    Returns
-    -------
-    bin_centers : numpy.ndarray
-        Magnitude associated with each slope.
-
-    slopes : numpy.ndarray
-        Segment slopes.
-
-    counts : numpy.ndarray
-        Incremental FMD counts.
     """
 
     magnitudes = np.asarray(
@@ -1103,9 +1032,8 @@ def mbass_segment_slopes(
             "bin_width must be positive."
         )
 
-    # ---------------------------------------------------------------
     # Construct magnitude bins
-    # ---------------------------------------------------------------
+
 
     min_mag = (
         np.floor(
@@ -1138,11 +1066,6 @@ def mbass_segment_slopes(
         edges[:-1]
         + bin_width / 2.0
     )
-
-    # ---------------------------------------------------------------
-    # Only adjacent bins with positive counts can be
-    # used because log10(0) is undefined.
-    # ---------------------------------------------------------------
 
     valid = (
         counts[:-1] > 0
@@ -1181,9 +1104,8 @@ def mbass_segment_slopes(
         counts.astype(int),
     )
 
-# =====================================================================
 # MBASS - CHANGE POINT
-# =====================================================================
+
 
 def mbass_change_point(
     slope_magnitudes,
@@ -1200,39 +1122,6 @@ def mbass_change_point(
     The main discontinuity is the candidate with the smallest
     p-value.
 
-    Parameters
-    ----------
-    slope_magnitudes : array-like
-        Magnitude associated with each segment slope.
-
-    slopes : array-like
-        Segment slope values.
-
-    alpha : float, default=0.05
-        Significance level.
-
-    Returns
-    -------
-    dict
-        Dictionary containing:
-
-        mc
-            Main change-point magnitude.
-
-        p_value
-            Smallest WMW p-value.
-
-        statistic
-            Mann-Whitney U statistic.
-
-        significant
-            Whether the change point is statistically significant.
-
-        candidate_magnitudes
-            All candidate change-point magnitudes.
-
-        p_values
-            Corresponding p-values.
     """
 
     slope_magnitudes = np.asarray(
@@ -1274,9 +1163,9 @@ def mbass_change_point(
     p_values = []
     statistics = []
 
-    # ---------------------------------------------------------------
+ 
     # Try every interior split
-    # ---------------------------------------------------------------
+
 
     for i in range(
         2,
@@ -1331,9 +1220,8 @@ def mbass_change_point(
         dtype=float,
     )
 
-    # ---------------------------------------------------------------
     # Main discontinuity = smallest p-value
-    # ---------------------------------------------------------------
+ 
 
     best_index = np.argmin(
         p_values
@@ -1366,9 +1254,8 @@ def mbass_change_point(
             p_values,
     }
 
-# =====================================================================
 # MBASS
-# =====================================================================
+
 
 def mbass(
     magnitudes,
@@ -1386,21 +1273,7 @@ def mbass(
     corresponding to the smallest probability from the
     Wilcoxon-Mann-Whitney change-point test.
 
-    Parameters
-    ----------
-    magnitudes : array-like
-        Earthquake magnitudes.
-
-    bin_width : float, default=0.1
-        Magnitude bin width.
-
-    alpha : float, default=0.05
-        Significance level for the WMW test.
-
-    Returns
-    -------
-    float
-        Estimated magnitude of completeness.
+   
     """
 
     slope_magnitudes, slopes, _ = (
@@ -1426,9 +1299,8 @@ def mbass(
         result["mc"]
     )
 
-# =====================================================================
 # MBASS BOOTSTRAP
-# =====================================================================
+
 
 def bootstrap_mbass(
     magnitudes,
@@ -1443,47 +1315,9 @@ def bootstrap_mbass(
     The catalog is resampled with replacement and MBASS is
     recalculated for every bootstrap sample.
 
-    Parameters
-    ----------
-    magnitudes : array-like
-        Earthquake magnitudes.
-
-    n_bootstrap : int, default=100
-        Number of bootstrap resamples.
-
-    bin_width : float, default=0.1
-        Magnitude bin width used by MBASS.
-
-    alpha : float, default=0.05
-        Significance level used by MBASS.
-
-    random_state : int or None
-        Random seed for reproducibility.
-
-    Returns
-    -------
-    dict
-        Dictionary containing:
-
-        mc
-            MBASS estimate from the original catalog.
-
-        mc_lower
-            Lower bootstrap confidence limit.
-
-        mc_upper
-            Upper bootstrap confidence limit.
-
-        bootstrap_samples
-            Successful bootstrap Mc estimates.
-
-        n_success
-            Number of successful bootstrap estimates.
     """
-
-    # ---------------------------------------------------------------
     # Validate input
-    # ---------------------------------------------------------------
+    
 
     magnitudes = np.asarray(
         magnitudes,
@@ -1514,9 +1348,9 @@ def bootstrap_mbass(
             "alpha must be between 0 and 1."
         )
 
-    # ---------------------------------------------------------------
+
     # Calculate MBASS for the original catalog
-    # ---------------------------------------------------------------
+    
 
     original_mc = mbass(
         magnitudes,
@@ -1524,19 +1358,16 @@ def bootstrap_mbass(
         alpha=alpha,
     )
 
-    # ---------------------------------------------------------------
     # Random number generator
-    # ---------------------------------------------------------------
-
+    
     rng = np.random.default_rng(
         random_state
     )
 
     bootstrap_samples = []
 
-    # ---------------------------------------------------------------
     # Bootstrap resampling
-    # ---------------------------------------------------------------
+
 
     for _ in range(n_bootstrap):
 
@@ -1563,9 +1394,6 @@ def bootstrap_mbass(
                 )
 
         except ValueError:
-            # A bootstrap sample may occasionally fail to
-            # produce a statistically significant MBASS
-            # change point. Skip that sample.
             continue
 
     bootstrap_samples = np.asarray(
@@ -1578,9 +1406,8 @@ def bootstrap_mbass(
             "Too few successful MBASS bootstrap estimates."
         )
 
-    # ---------------------------------------------------------------
     # 95% percentile confidence interval
-    # ---------------------------------------------------------------
+    
 
     lower = np.percentile(
         bootstrap_samples,

@@ -11,9 +11,8 @@ from eq_toolkit.quality.mc import (
 )
 
 
-# =====================================================================
+
 # MAXC
-# =====================================================================
 
 def test_maxc():
 
@@ -40,9 +39,8 @@ def test_maxc():
     assert mc >= 2.3
 
 
-# =====================================================================
 # B-VALUE
-# =====================================================================
+
 
 def test_b_value():
 
@@ -69,9 +67,9 @@ def test_b_value():
     assert np.isfinite(b)
 
 
-# =====================================================================
+
 # B-VALUE UNCERTAINTY
-# =====================================================================
+
 
 def test_b_value_sigma():
 
@@ -100,9 +98,9 @@ def test_b_value_sigma():
     assert np.isfinite(sigma)
 
 
-# =====================================================================
+
 # GFT
-# =====================================================================
+
 
 def test_gft():
 
@@ -142,9 +140,8 @@ def test_gft():
         pass
 
 
-# =====================================================================
 # SYNTHETIC GR CATALOG
-# =====================================================================
+
 
 def _make_synthetic_gr_catalog(
     true_mc=2.5,
@@ -196,9 +193,8 @@ def _make_synthetic_gr_catalog(
     )
 
 
-# =====================================================================
 # GFT KNOWN-MC TEST
-# =====================================================================
+
 
 def test_gft_recovers_known_mc():
 
@@ -244,9 +240,9 @@ def test_gft_recovers_known_mc():
     )
 
 
-# =====================================================================
+
 # MBS
-# =====================================================================
+
 
 def test_mbs():
 
@@ -292,9 +288,7 @@ def test_mbs():
         atol=0.1,
     )
 
-# =====================================================================
 # EMR DETECTION PROBABILITY
-# =====================================================================
 
 def test_emr_detection_probability():
 
@@ -344,9 +338,9 @@ def test_emr_detection_probability():
         < probability[-1]
     )
 
-# =====================================================================
+
 # EMR LOG-LIKELIHOOD
-# =====================================================================
+
 
 def test_emr_log_likelihood():
 
@@ -382,9 +376,9 @@ def test_emr_log_likelihood():
 
     assert likelihood < 0
 
-# =====================================================================
+
 # EMR MAXIMUM LIKELIHOOD
-# =====================================================================
+
 
 def test_emr():
 
@@ -431,9 +425,9 @@ def test_emr():
         atol=0.3,
     )        
 
-# =====================================================================
+
 # EMR BOOTSTRAP
-# =====================================================================
+
 
 def test_bootstrap_emr():
 
@@ -504,9 +498,8 @@ def test_bootstrap_emr():
         result["bootstrap_samples"]
     ) >= 10
 
-# =====================================================================
+
 # MBASS SEGMENT SLOPES
-# =====================================================================
 
 def test_mbass_segment_slopes():
 
@@ -544,9 +537,8 @@ def test_mbass_segment_slopes():
         np.isfinite(slopes)
     )
 
-# =====================================================================
 # MBASS CHANGE POINT
-# =====================================================================
+
 
 def test_mbass_change_point():
 
@@ -604,19 +596,12 @@ def test_mbass_change_point():
         atol=0.5,
     )
 
-# =====================================================================
 # MBASS
-# =====================================================================
+
 
 def test_mbass():
 
     rng = np.random.default_rng(42)
-
-    # ---------------------------------------------------------------
-    # Generate an incomplete low-magnitude population.
-    #
-    # This population is intentionally NOT Gutenberg-Richter-like.
-    # ---------------------------------------------------------------
 
     low_magnitudes = rng.uniform(
         1.0,
@@ -629,10 +614,7 @@ def test_mbass():
         1,
     )
 
-    # ---------------------------------------------------------------
-    # Generate a clean Gutenberg-Richter-like population
-    # above the true completeness magnitude.
-    # ---------------------------------------------------------------
+
 
     b = 1.0
     mc_true = 2.5
@@ -676,9 +658,8 @@ def test_mbass():
 
     assert 2.0 <= mc <= 3.0
 
-# =====================================================================
 # MBASS BOOTSTRAP
-# =====================================================================
+
 
 def test_bootstrap_mbass():
 
@@ -688,9 +669,8 @@ def test_bootstrap_mbass():
 
     rng = np.random.default_rng(42)
 
-    # ---------------------------------------------------------------
     # Create incomplete low-magnitude population
-    # ---------------------------------------------------------------
+   
 
     low_magnitudes = rng.uniform(
         1.0,
@@ -703,9 +683,7 @@ def test_bootstrap_mbass():
         1,
     )
 
-    # ---------------------------------------------------------------
     # Create Gutenberg-Richter-like population above Mc
-    # ---------------------------------------------------------------
 
     mc_true = 2.5
     b = 1.0
@@ -736,9 +714,8 @@ def test_bootstrap_mbass():
         ]
     )
 
-    # ---------------------------------------------------------------
     # Run MBASS bootstrap
-    # ---------------------------------------------------------------
+ 
 
     result = bootstrap_mbass(
         magnitudes,
@@ -748,9 +725,9 @@ def test_bootstrap_mbass():
         random_state=42,
     )
 
-    # ---------------------------------------------------------------
+   
     # Check returned fields
-    # ---------------------------------------------------------------
+ 
 
     assert "mc" in result
     assert "mc_lower" in result
@@ -758,9 +735,8 @@ def test_bootstrap_mbass():
     assert "bootstrap_samples" in result
     assert "n_success" in result
 
-    # ---------------------------------------------------------------
     # Check finite results
-    # ---------------------------------------------------------------
+    
 
     assert np.isfinite(
         result["mc"]
@@ -774,34 +750,21 @@ def test_bootstrap_mbass():
         result["mc_upper"]
     )
 
-    # ---------------------------------------------------------------
+   
     # Confidence interval must be ordered
-    # ---------------------------------------------------------------
 
-    assert (
-        result["mc_lower"]
-        <= result["mc_upper"]
-    )
+    assert ( result["mc_lower"]<= result["mc_upper"])
 
-    # ---------------------------------------------------------------
+    
     # At least 10 bootstrap runs should succeed
-    # ---------------------------------------------------------------
+    
 
-    assert (
-        result["n_success"]
-        >= 10
-    )
+    assert (result["n_success"] >= 10)
 
-    assert (
-        len(
-            result["bootstrap_samples"]
-        )
-        == result["n_success"]
-    )
+    assert (len( result["bootstrap_samples"])== result["n_success"])
 
-    # ---------------------------------------------------------------
+    
     # Mc should remain in a reasonable range
-    # ---------------------------------------------------------------
 
     assert (
         1.5

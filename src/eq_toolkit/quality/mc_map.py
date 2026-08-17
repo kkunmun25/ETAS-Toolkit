@@ -91,12 +91,6 @@ def nearest_neighbor_magnitudes(
             "n_neighbors."
         )
 
-    # ---------------------------------------------------------------
-    # Convert geographic coordinates to 3-D unit-sphere coordinates.
-    #
-    # This lets cKDTree calculate great-circle-equivalent nearest
-    # neighbors without requiring an additional geographic package.
-    # ---------------------------------------------------------------
 
     lat = np.radians(
         data[latitude_col].to_numpy(
@@ -192,36 +186,7 @@ def create_mc_grid(
     """
     Create a regular geographic grid for spatial Mc estimation.
 
-    Parameters
-    ----------
-    latitude_min : float
-        Minimum latitude.
 
-    latitude_max : float
-        Maximum latitude.
-
-    longitude_min : float
-        Minimum longitude.
-
-    longitude_max : float
-        Maximum longitude.
-
-    latitude_step : float, default=0.5
-        Latitude spacing in degrees.
-
-    longitude_step : float, default=0.5
-        Longitude spacing in degrees.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Grid containing:
-
-        latitude
-            Grid-point latitude.
-
-        longitude
-            Grid-point longitude.
     """
 
     if latitude_min >= latitude_max:
@@ -291,38 +256,7 @@ def spatial_mc(
     every grid point. Mc is then estimated independently from
     each local sample using the MAXC method.
 
-    Parameters
-    ----------
-    catalog : pandas.DataFrame
-        Earthquake catalog.
 
-    grid : pandas.DataFrame
-        Grid containing 'latitude' and 'longitude' columns.
-
-    n_neighbors : int, default=100
-        Number of nearest earthquakes used at every grid point.
-
-    bin_width : float, default=0.1
-        Magnitude bin width for MAXC.
-
-    latitude_col : str, default="latitude"
-        Latitude column in catalog.
-
-    longitude_col : str, default="longitude"
-        Longitude column in catalog.
-
-    magnitude_col : str, default="magnitude"
-        Magnitude column in catalog.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Grid with an additional 'mc' column.
-
-    Notes
-    -----
-    The physical search radius is allowed to vary from grid point
-    to grid point. The number of earthquakes remains constant.
     """
 
     if not isinstance(
@@ -519,25 +453,6 @@ def plot_mc_map(
     """
     Plot spatially varying magnitude of completeness.
 
-    Parameters
-    ----------
-    spatial_result : pandas.DataFrame
-        Output from spatial_mc(). Must contain:
-        latitude, longitude, and mc.
-
-    ax : matplotlib.axes.Axes, optional
-        Existing axes. If None, a new figure is created.
-
-    cmap : str, default="viridis"
-        Matplotlib colormap.
-
-    marker_size : float, default=50
-        Size of grid-point markers.
-
-    Returns
-    -------
-    matplotlib.axes.Axes
-        Axes containing the Mc map.
     """
 
     import matplotlib.pyplot as plt

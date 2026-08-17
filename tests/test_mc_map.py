@@ -7,11 +7,7 @@ from eq_toolkit.quality.mc_map import (
     spatial_mc ,
     plot_mc_map
 )
-
-
-# =====================================================================
 # CONSTANT-N NEAREST-NEIGHBOR TEST
-# =====================================================================
 
 def test_nearest_neighbor_magnitudes():
 
@@ -57,23 +53,17 @@ def test_nearest_neighbor_magnitudes():
         n_neighbors=5,
     )
 
-    # Exactly N earthquakes must be returned.
     assert len(magnitudes) == 5
 
-    # All returned values must be finite.
     assert np.all(
         np.isfinite(magnitudes)
     )
 
-    # The local cluster should be selected,
-    # not the distant magnitude-5 events.
     assert np.max(
         magnitudes
     ) < 5.0
 
-# =====================================================================
 # SPATIAL GRID TEST
-# =====================================================================
 
 def test_create_mc_grid():
 
@@ -86,13 +76,7 @@ def test_create_mc_grid():
         longitude_step=0.5,
     )
 
-    # 3 latitude points:
-    # 10.0, 10.5, 11.0
-    #
-    # 3 longitude points:
-    # 80.0, 80.5, 81.0
-    #
-    # Total = 9 grid points.
+    
 
     assert len(grid) == 9
 
@@ -113,17 +97,13 @@ def test_create_mc_grid():
     assert grid["longitude"].min() == 80.0
     assert grid["longitude"].max() == 81.0    
 
-# =====================================================================
 # SPATIAL Mc TEST
-# =====================================================================
 
 def test_spatial_mc():
 
     rng = np.random.default_rng(42)
 
-    # ---------------------------------------------------------------
     # Synthetic earthquake catalog
-    # ---------------------------------------------------------------
 
     n_events = 500
 
@@ -152,9 +132,7 @@ def test_spatial_mc():
         }
     )
 
-    # ---------------------------------------------------------------
     # Create grid
-    # ---------------------------------------------------------------
 
     grid = create_mc_grid(
         latitude_min=10.0,
@@ -165,9 +143,7 @@ def test_spatial_mc():
         longitude_step=0.5,
     )
 
-    # ---------------------------------------------------------------
     # Calculate spatial Mc
-    # ---------------------------------------------------------------
 
     result = spatial_mc(
         catalog,
@@ -175,10 +151,8 @@ def test_spatial_mc():
         n_neighbors=100,
         bin_width=0.1,
     )
-
-    # ---------------------------------------------------------------
     # Check structure
-    # ---------------------------------------------------------------
+    
 
     assert len(result) == len(grid)
 
@@ -186,9 +160,8 @@ def test_spatial_mc():
     assert "longitude" in result.columns
     assert "mc" in result.columns
 
-    # ---------------------------------------------------------------
     # At least some grid points should have a valid Mc.
-    # ---------------------------------------------------------------
+
 
     assert result["mc"].notna().any()
 
@@ -209,9 +182,9 @@ def test_spatial_mc():
         <= catalog["magnitude"].max()
     )   
 
-# =====================================================================
+
 # SPATIAL Mc MAP TEST
-# =====================================================================
+
 
 def test_plot_mc_map():
 
