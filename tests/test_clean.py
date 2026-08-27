@@ -1,7 +1,7 @@
 import pandas as pd
 
-from src.eq_toolkit.catalog.model import Catalog
-from src.eq_toolkit.catalog.clean import (
+from eq_toolkit.catalog.model import Catalog
+from eq_toolkit.catalog.clean import (
     drop_duplicates,
     sort_by_time,
     filter_magnitude,

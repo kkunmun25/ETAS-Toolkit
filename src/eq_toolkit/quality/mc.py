@@ -1,6 +1,7 @@
 import numpy as np
 
 from scipy.special import erf
+from scipy.stats import kstest
 from scipy.optimize import minimize
 from scipy.stats import mannwhitneyu
 
@@ -1428,3 +1429,62 @@ def bootstrap_mbass(
             len(bootstrap_samples)
         ),
     }
+
+def lilliefors_exponentiality(
+    magnitudes,
+    mc,
+):
+    """
+    Lilliefors test for exponentiality of magnitudes
+    above the selected magnitude of completeness.
+
+    The Gutenberg-Richter relation implies that
+    magnitude excesses (M - Mc) should approximately
+    follow an exponential distribution.
+
+    Parameters
+    ----------
+    magnitudes : array-like
+        Earthquake magnitudes.
+
+    mc : float
+        Selected magnitude of completeness.
+
+    Returns
+    -------
+    statistic : float
+        Lilliefors KS statistic.
+
+    p_value : float
+        Lilliefors p-value.
+    """
+
+    import numpy as np
+    from statsmodels.stats.diagnostic import lilliefors
+
+    magnitudes = np.asarray(
+        magnitudes,
+        dtype=float,
+    )
+
+    magnitudes = magnitudes[
+        np.isfinite(magnitudes)
+    ]
+
+    magnitudes = magnitudes[
+        magnitudes >= mc
+    ]
+
+    if len(magnitudes) < 10:
+        raise ValueError(
+            "At least 10 magnitudes are required."
+        )
+
+    excess = magnitudes - mc
+
+    statistic, p_value = lilliefors(
+        excess,
+        dist="exp",
+    )
+
+    return statistic, p_value

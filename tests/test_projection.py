@@ -1,5 +1,5 @@
 from pyproj import Geod
-from src.eq_toolkit.catalog.projection import lonlat_to_xy, xy_to_lonlat
+from eq_toolkit.catalog.projection import lonlat_to_xy, xy_to_lonlat
 
 # WGS84 is the standard Earth model used by GPS
 geod = Geod(ellps="WGS84")
@@ -21,5 +21,4 @@ def test_round_trip():
 
     print(f"Round-trip error = {distance:.6f} metres")
 
-    # Professor's requirement: error must be less than 1 metre
     assert distance < 1.0

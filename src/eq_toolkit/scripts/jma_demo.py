@@ -259,4 +259,4 @@ def test_jma_real_file():
         "event_id",
     ]
 
-    assert list(catalog.data.columns) == expected_columns        
+    assert list(catalog.data.columns) == expected_columns   
