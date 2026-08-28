@@ -15,6 +15,10 @@ Run from repository root:
 from pathlib import Path
 import warnings
 warnings.filterwarnings("ignore")
+from eq_toolkit.analysis.catalog_compare import (
+    load_scsn_catalog,
+    catalog_comparison_summary,
+)
 
 import numpy as np
 import pandas as pd
@@ -1702,3 +1706,62 @@ print(
 print(
     OUT.resolve()
 )
+
+
+def figure_catalog_count_by_magnitude():
+
+    scsn = load_scsn_catalog("sc-catalog.txt")
+
+    usgs = pd.read_csv(
+        "usgs_sc_same_region.csv"
+    )
+
+    usgs["time"] = pd.to_datetime(
+        usgs["time"],
+        format="mixed",
+        utc=True,
+    )
+
+    comparison = catalog_comparison_summary(
+        scsn,
+        usgs,
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    ax.step(
+        comparison["magnitude"],
+        comparison["scsn_count"],
+        where="mid",
+        label="SCSN",
+        linewidth=2,
+    )
+
+    ax.step(
+        comparison["magnitude"],
+        comparison["usgs_count"],
+        where="mid",
+        label="USGS",
+        linewidth=2,
+    )
+
+    ax.set_xlabel("Magnitude")
+    ax.set_ylabel("Number of events")
+    ax.set_title(
+        "SCSN vs USGS Event Counts by Magnitude"
+    )
+
+    ax.legend()
+    ax.grid(alpha=0.3)
+
+    fig.tight_layout()
+
+    fig.savefig(
+        "docs/figures/professor/catalog_count_by_magnitude.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+    plt.close(fig)
+
+figure_catalog_count_by_magnitude()    
