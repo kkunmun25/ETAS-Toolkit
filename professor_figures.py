@@ -1,23 +1,15 @@
 """
-Professor figure pack for ETAS-Toolkit
-======================================
 
-Run from the repository root:
+Primary catalog:
+    sc-catalog.txt  (SCSN / SCEDC)
+
+Comparison catalog:
+    USGS catalog automatically downloaded for the SAME
+    geographic region and SAME time period.
+
+Run from repository root:
+
     python professor_figures.py
-
-Before running, set:
-    CAT1 = "your_first_catalog.csv"
-    CAT2 = "your_second_catalog.csv"   # needed for Figs 3-5
-
-The script uses the repository's existing ETAS modules where useful.
-It writes fig01.png ... fig23.png into docs/figures/professor/.
-
-IMPORTANT:
-- Figs 1,2,8,12,13 overlap figures already present in docs/figures.
-- Figs 3-5 genuinely require TWO catalogs for the same region.
-- Figs 17-20 require a fitted EM run/trace for a scientifically complete report.
-  This script creates diagnostic/model demonstrations so you can see the required
-  figure format, but do not present a demonstration as a fitted result.
 """
 
 from pathlib import Path
@@ -27,441 +19,1686 @@ warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy import stats
+import requests
 
-# ---------------- USER SETTINGS ----------------
-CAT1 = "andaman_catalog.csv"
-CAT2 = "sc-catalog.txt"   # replace with your second real catalog
+# ============================================================
+# SETTINGS
+# ============================================================
+
+SC_FILE = Path("sc-catalog.txt")
+USGS_FILE = Path("usgs_sc_same_region.csv")
+
 OUT = Path("docs/figures/professor")
 OUT.mkdir(parents=True, exist_ok=True)
 
-# ETAS demonstration parameters for Figs 14-23
-MU, K, ALPHA, C, P, M0 = 0.08, 0.25, 0.8, 0.01, 1.15, 3.0
 RNG = np.random.default_rng(42)
 
-# ---------------- DATA HELPERS ----------------
-def load_catalog(path):
-    p = Path(path)
-    if p.suffix.lower() == ".parquet":
-        df = pd.read_parquet(p)
-    else:
-        df = pd.read_csv(p)
-    df = df.copy()
-    rename = {}
-    for c in df.columns:
-        cl = c.lower().strip()
-        if cl in ("mag", "magnitude_value", "magnitude"):
-            rename[c] = "magnitude"
-        elif cl in ("lat", "latitude"):
-            rename[c] = "latitude"
-        elif cl in ("lon", "longitude"):
-            rename[c] = "longitude"
-        elif cl in ("depth", "depth_km"):
-            rename[c] = "depth"
-        elif cl in ("date", "datetime", "origin_time", "time"):
-            rename[c] = "time"
-    df = df.rename(columns=rename)
-    if "time" in df:
-        df["time"] = pd.to_datetime(df["time"], errors="coerce", utc=True)
-    for c in ["magnitude", "latitude", "longitude", "depth"]:
-        if c in df:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df.dropna(subset=[c for c in ["time","magnitude"] if c in df]).sort_values("time").reset_index(drop=True)
+# ============================================================
+# 1. READ SCSN FIXED-WIDTH CATALOG
+# ============================================================
 
-def save(fig, n, title):
-    fig.suptitle(f"Figure {n}: {title}", fontsize=13)
+def read_scsn(path):
+
+    rows = []
+
+    with open(path, "r", errors="ignore") as f:
+
+        for line in f:
+
+            line = line.strip()
+
+            if not line:
+                continue
+
+            if line.startswith("#"):
+                continue
+
+            if line.startswith("<"):
+                continue
+
+            parts = line.split()
+
+            # Expected:
+            # date time ET GT MAG M LAT LON DEPTH Q EVID ...
+
+            if len(parts) < 10:
+                continue
+
+            try:
+
+                date = parts[0]
+                time = parts[1]
+
+                dt = pd.to_datetime(
+                    date + " " + time,
+                    errors="coerce",
+                    utc=True
+                )
+
+                mag = float(parts[4])
+                lat = float(parts[6])
+                lon = float(parts[7])
+                depth = float(parts[8])
+                evid = parts[10]
+
+                if pd.isna(dt):
+                    continue
+
+                rows.append(
+                    [
+                        dt,
+                        mag,
+                        lat,
+                        lon,
+                        depth,
+                        evid
+                    ]
+                )
+
+            except Exception:
+                continue
+
+    df = pd.DataFrame(
+        rows,
+        columns=[
+            "time",
+            "magnitude",
+            "latitude",
+            "longitude",
+            "depth",
+            "event_id"
+        ]
+    )
+
+    return df.sort_values("time").reset_index(drop=True)
+
+
+# ============================================================
+# 2. DOWNLOAD USGS CATALOG
+# ============================================================
+
+def get_usgs_catalog(sc):
+
+    start = sc.time.min().strftime("%Y-%m-%d")
+    end = (
+        sc.time.max() + pd.Timedelta(days=1)
+    ).strftime("%Y-%m-%d")
+
+    min_lat = sc.latitude.min()
+    max_lat = sc.latitude.max()
+
+    min_lon = sc.longitude.min()
+    max_lon = sc.longitude.max()
+
+    url = "https://earthquake.usgs.gov/fdsnws/event/1/query"
+
+    params = {
+        "format": "geojson",
+        "starttime": start,
+        "endtime": end,
+        "minlatitude": float(min_lat),
+        "maxlatitude": float(max_lat),
+        "minlongitude": float(min_lon),
+        "maxlongitude": float(max_lon),
+        "minmagnitude": 2.5,
+        "orderby": "time-asc",
+        "limit": 20000
+    }
+
+    print("\nDownloading USGS comparison catalog...")
+    print("Region:")
+    print(min_lat, max_lat, min_lon, max_lon)
+    print("Period:")
+    print(start, "to", end)
+
+    r = requests.get(
+        url,
+        params=params,
+        timeout=120
+    )
+
+    r.raise_for_status()
+
+    data = r.json()
+
+    rows = []
+
+    for feature in data["features"]:
+
+        prop = feature["properties"]
+        geo = feature["geometry"]
+
+        if geo["coordinates"] is None:
+            continue
+
+        lon, lat, depth = geo["coordinates"]
+
+        if prop["mag"] is None:
+            continue
+
+        rows.append(
+            [
+                pd.to_datetime(
+                    prop["time"],
+                    unit="ms",
+                    utc=True
+                ),
+                float(prop["mag"]),
+                float(lat),
+                float(lon),
+                float(depth) if depth is not None else np.nan,
+                feature["id"]
+            ]
+        )
+
+    usgs = pd.DataFrame(
+        rows,
+        columns=[
+            "time",
+            "magnitude",
+            "latitude",
+            "longitude",
+            "depth",
+            "event_id"
+        ]
+    )
+
+    usgs = usgs.sort_values("time").reset_index(drop=True)
+
+    usgs.to_csv(USGS_FILE, index=False)
+
+    print(
+        f"USGS catalog downloaded: {len(usgs)} events"
+    )
+
+    return usgs
+
+
+# ============================================================
+# 3. COMMON HELPERS
+# ============================================================
+
+def savefig(fig, number, title):
+
+    fig.suptitle(
+        f"Figure {number}: {title}",
+        fontsize=13
+    )
+
     fig.tight_layout()
-    fig.savefig(OUT / f"fig{n:02d}.png", dpi=220, bbox_inches="tight")
+
+    filename = OUT / f"fig{number:02d}.png"
+
+    fig.savefig(
+        filename,
+        dpi=250,
+        bbox_inches="tight"
+    )
+
     plt.close(fig)
 
-def mc_maxc(m, bw=0.1):
-    m = np.asarray(m, float)
-    lo = np.floor(m.min()/bw)*bw
-    bins = np.arange(lo, np.ceil(m.max()/bw)*bw+bw, bw)
-    h,e = np.histogram(m, bins=bins)
-    return float(e[np.argmax(h)])
+    print("Created:", filename)
 
-def b_aki(m, mc, bw=0.1):
-    x = np.asarray(m)[np.asarray(m) >= mc]
-    return np.log10(np.e)/(np.mean(x)-mc+bw/2)
 
-def simulate_etas(n=600, duration=365.0, seed=42):
-    """Simple branching ETAS demonstration catalog for model figures."""
-    rng = np.random.default_rng(seed)
-    t = []
-    mag = []
-    # background events
-    nb = rng.poisson(MU * duration)
-    t.extend(rng.uniform(0, duration, nb))
-    mag.extend(M0 + rng.exponential(0.45, nb))
-    # recursive aftershock generation
-    i = 0
-    while i < len(t) and len(t) < n:
-        ti, mi = t[i], mag[i]
-        lam = K * 10**(ALPHA*(mi-M0))
-        nk = rng.poisson(max(0, lam))
-        for _ in range(nk):
-            delay = C * ((1-rng.random())**(-1/(P-1)) - 1)
-            tj = ti + delay
-            if tj < duration and len(t) < n:
-                t.append(tj)
-                mag.append(M0 + rng.exponential(0.45))
-        i += 1
-    order = np.argsort(t)
-    return np.asarray(t)[order], np.asarray(mag)[order]
+def maxc(mags, bin_width=0.1):
 
-# ---------------- 1-13 CATALOG FIGURES ----------------
-cat1 = load_catalog(CAT1)
+    mags = np.asarray(mags, dtype=float)
+    mags = mags[np.isfinite(mags)]
 
-# 1. Epicentre map, magnitude scaled
-if {"latitude","longitude","magnitude"}.issubset(cat1.columns):
-    fig, ax = plt.subplots(figsize=(8,6))
-    s = 12 * 10**(0.55*(cat1.magnitude-cat1.magnitude.min()))
-    sc = ax.scatter(cat1.longitude, cat1.latitude, s=s, c=cat1.magnitude, alpha=.75, edgecolor="k", linewidth=.2)
-    fig.colorbar(sc, ax=ax, label="Magnitude")
-    ax.set(xlabel="Longitude (°)", ylabel="Latitude (°)", title="Epicentre map, magnitude-scaled")
-    ax.grid(alpha=.25); save(fig,1,"Epicentre map, magnitude-scaled")
+    bins = np.arange(
+        np.floor(mags.min() / bin_width) * bin_width,
+        np.ceil(mags.max() / bin_width) * bin_width
+        + bin_width,
+        bin_width
+    )
 
-# 2. Time-magnitude stem
-if {"time","magnitude"}.issubset(cat1.columns):
-    fig, ax = plt.subplots(figsize=(10,5))
-    ax.stem(cat1.time, cat1.magnitude, markerfmt="o", basefmt=" ")
-    ax.set(xlabel="Time", ylabel="Magnitude", title="Time-magnitude stem plot")
-    ax.grid(alpha=.25); save(fig,2,"Time-magnitude stem plot")
+    hist, edges = np.histogram(
+        mags,
+        bins=bins
+    )
 
-# 3. Two catalogs cumulative count
-try:
-    cat2 = load_catalog(CAT2)
-    if {"time"}.issubset(cat2.columns):
-        fig, ax = plt.subplots(figsize=(9,5))
-        ax.step(cat1.time, np.arange(1,len(cat1)+1), where="post", label="Catalog 1")
-        ax.step(cat2.time, np.arange(1,len(cat2)+1), where="post", label="Catalog 2")
-        ax.set(xlabel="Time", ylabel="Cumulative event count")
-        ax.legend(); ax.grid(alpha=.25); save(fig,3,"Two catalogs: cumulative event count")
-    else: raise ValueError
-except Exception:
-    print("FIG 3 skipped: provide a real second catalog in CAT2.")
+    return float(
+        edges[np.argmax(hist)]
+    )
 
-# 4. Common-event magnitude comparison
-try:
-    a = cat1.copy(); b = cat2.copy()
-    if "event_id" in a and "event_id" in b:
-        x = a.merge(b, on="event_id", suffixes=("_1","_2"))
-    else:
-        # nearest time matching, 60 s tolerance
-        x = pd.merge_asof(a.sort_values("time"), b.sort_values("time"),
-                          on="time", direction="nearest", tolerance=pd.Timedelta("60s"),
-                          suffixes=("_1","_2")).dropna(subset=["magnitude_1","magnitude_2"])
-    fig, ax = plt.subplots(figsize=(6,6))
-    ax.scatter(x.magnitude_1, x.magnitude_2, s=18, alpha=.6)
-    lim=[min(x.magnitude_1.min(),x.magnitude_2.min()), max(x.magnitude_1.max(),x.magnitude_2.max())]
-    ax.plot(lim,lim,"k--",label="1:1")
-    ax.set(xlabel="Catalog 1 magnitude",ylabel="Catalog 2 magnitude")
-    ax.legend(); ax.grid(alpha=.25); save(fig,4,"Common events: magnitude comparison")
-except Exception:
-    print("FIG 4 skipped: common events need event IDs or close origin times.")
 
-# 5. Common-event location difference
-try:
-    if "event_id" in cat1 and "event_id" in cat2:
-        x = cat1.merge(cat2,on="event_id",suffixes=("_1","_2"))
-    else:
-        x = pd.merge_asof(cat1.sort_values("time"),cat2.sort_values("time"),on="time",
-                          direction="nearest",tolerance=pd.Timedelta("60s"),
-                          suffixes=("_1","_2")).dropna(subset=["latitude_1","latitude_2"])
-    dlat = (x.latitude_1-x.latitude_2)*111.32
-    dlon = (x.longitude_1-x.longitude_2)*111.32*np.cos(np.radians((x.latitude_1+x.latitude_2)/2))
-    dist = np.hypot(dlat,dlon)
-    fig, ax = plt.subplots(figsize=(7,5))
-    ax.hist(dist,bins=30)
-    ax.set(xlabel="Epicentre separation (km)",ylabel="Common events",title="Location difference for common events")
-    ax.grid(alpha=.25); save(fig,5,"Common-event location difference")
-except Exception:
-    print("FIG 5 skipped: common events need event IDs or close origin times.")
+def aki_b(mags, mc, dm=0.1):
 
-# 6. Fine magnitude histogram
-m = cat1.magnitude.dropna().to_numpy()
-fig, ax = plt.subplots(figsize=(8,5))
-bw=.01
-bins=np.arange(np.floor(m.min()/bw)*bw,np.ceil(m.max()/bw)*bw+bw,bw)
-ax.hist(m,bins=bins,edgecolor="black",linewidth=.25)
-ax.set(xlabel="Magnitude",ylabel="Count",title="Fine-binned magnitude histogram")
-ax.grid(alpha=.2); save(fig,6,"Magnitude histogram at fine binning")
+    mags = np.asarray(mags, dtype=float)
 
-# 7. Artifact: reporting/day-night rate
-if "time" in cat1:
-    tmp=cat1.set_index("time").resample("D").size()
-    fig, ax=plt.subplots(figsize=(10,4))
-    ax.plot(tmp.index,tmp.values,lw=1)
-    ax.set(xlabel="Day",ylabel="Events/day",title="Catalog-rate artifact diagnostic")
-    ax.grid(alpha=.25); save(fig,7,"Catalog artifact diagnostic")
+    x = mags[mags >= mc]
 
-# 8. FMD cumulative + non-cumulative, Mc
-fig, ax=plt.subplots(figsize=(8,6))
-vals=np.arange(np.floor(m.min()/0.1)*0.1,np.ceil(m.max()/0.1)*0.1+.1,.1)
-inc=np.array([np.sum((m>=v-.05)&(m<v+.05)) for v in vals])
-cum=np.array([np.sum(m>=v) for v in vals])
-mc=mc_maxc(m)
-ax.semilogy(vals[inc>0],inc[inc>0],"o",label="Non-cumulative")
-ax.semilogy(vals[cum>0],cum[cum>0],"s-",label="Cumulative")
-ax.axvline(mc,ls=":",label=f"Mc={mc:.2f}")
-ax.set(xlabel="Magnitude",ylabel="Number of events"); ax.legend(); ax.grid(alpha=.25,which="both")
-save(fig,8,"Frequency-magnitude distribution")
+    if len(x) < 5:
+        return np.nan
 
-# 9. Mc by several methods
+    return (
+        np.log(10)
+        / (np.mean(x) - mc + dm / 2)
+    )
+
+
+def haversine_km(lat1, lon1, lat2, lon2):
+
+    R = 6371.0
+
+    lat1 = np.radians(lat1)
+    lat2 = np.radians(lat2)
+
+    dlat = np.radians(lat2 - lat1)
+    dlon = np.radians(lon2 - lon1)
+
+    a = (
+        np.sin(dlat / 2) ** 2
+        +
+        np.cos(lat1)
+        * np.cos(lat2)
+        * np.sin(dlon / 2) ** 2
+    )
+
+    return (
+        2 * R * np.arcsin(
+            np.sqrt(a)
+        )
+    )
+
+
+# ============================================================
+# LOAD CATALOGS
+# ============================================================
+
+print("\nReading SCSN catalog...")
+
+sc = read_scsn(SC_FILE)
+
+print(
+    f"SCSN events: {len(sc)}"
+)
+
+print(
+    "SCSN period:",
+    sc.time.min(),
+    "to",
+    sc.time.max()
+)
+
+if USGS_FILE.exists():
+
+    usgs = pd.read_csv(
+        USGS_FILE,
+        parse_dates=["time"]
+    )
+
+    usgs["time"] = pd.to_datetime(
+        usgs["time"],
+        utc=True,
+        format="mixed",
+    )
+
+else:
+
+    usgs = get_usgs_catalog(sc)
+
+
+# ============================================================
+# FIGURE 1
+# EPICENTRE MAP
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(8, 6))
+
+size = (
+    8
+    * 10 ** (
+        0.55
+        * (
+            sc.magnitude
+            - sc.magnitude.min()
+        )
+    )
+)
+
+s = ax.scatter(
+    sc.longitude,
+    sc.latitude,
+    s=size,
+    c=sc.magnitude,
+    cmap="viridis",
+    alpha=0.70,
+    edgecolors="black",
+    linewidths=0.2
+)
+
+fig.colorbar(
+    s,
+    ax=ax,
+    label="Magnitude"
+)
+
+ax.set_xlabel("Longitude (°)")
+ax.set_ylabel("Latitude (°)")
+ax.grid(alpha=0.25)
+
+savefig(
+    fig,
+    1,
+    "SCSN epicentre map, magnitude-scaled"
+)
+
+
+# ============================================================
+# FIGURE 2
+# TIME-MAGNITUDE STEM
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(11, 5))
+
+ax.stem(
+    sc.time,
+    sc.magnitude,
+    markerfmt=".",
+    basefmt=" "
+)
+
+ax.set_xlabel("Time")
+ax.set_ylabel("Magnitude")
+ax.grid(alpha=0.25)
+
+savefig(
+    fig,
+    2,
+    "Time-magnitude stem plot"
+)
+
+
+# ============================================================
+# FIGURE 3
+# TWO CATALOGS — CUMULATIVE COUNT
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(10, 5))
+
+ax.step(
+    sc.time,
+    np.arange(1, len(sc) + 1),
+    where="post",
+    label="SCSN / SCEDC"
+)
+
+ax.step(
+    usgs.time,
+    np.arange(1, len(usgs) + 1),
+    where="post",
+    label="USGS"
+)
+
+ax.set_xlabel("Time")
+ax.set_ylabel("Cumulative event count")
+ax.legend()
+ax.grid(alpha=0.25)
+
+savefig(
+    fig,
+    3,
+    "Same region and period: cumulative event count"
+)
+
+
+# ============================================================
+# MATCH COMMON EVENTS
+# ============================================================
+
+def match_catalogs(a, b, tolerance_seconds=60):
+
+    aa = a.sort_values("time").copy()
+    bb = b.sort_values("time").copy()
+
+    # Force identical datetime dtype/precision
+    aa["time"] = pd.to_datetime(
+        aa["time"],
+        utc=True
+    ).astype("datetime64[ns, UTC]")
+
+    bb["time"] = pd.to_datetime(
+        bb["time"],
+        utc=True
+    ).astype("datetime64[ns, UTC]")
+
+    matches = pd.merge_asof(
+        aa,
+        bb,
+        on="time",
+        direction="nearest",
+        tolerance=pd.Timedelta(
+            seconds=tolerance_seconds
+        ),
+        suffixes=("_scsn", "_usgs")
+    )
+
+    matches = matches.dropna(
+        subset=[
+            "magnitude_scsn",
+            "magnitude_usgs"
+        ]
+    )
+
+    return matches
+
+common = match_catalogs(sc,usgs,tolerance_seconds=60)
+
+print("Common events matched:",len(common))
+
+if len(common) == 0:
+    raise RuntimeError(
+        "No common events found between SCSN and USGS."
+    )
+
+
+# ============================================================
+# FIGURE 4
+# COMMON EVENT MAGNITUDE COMPARISON
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(6, 6))
+
+ax.scatter(
+    common.magnitude_scsn,
+    common.magnitude_usgs,
+    s=15,
+    alpha=0.5
+)
+
+lo = min(
+    common.magnitude_scsn.min(),
+    common.magnitude_usgs.min()
+)
+
+hi = max(
+    common.magnitude_scsn.max(),
+    common.magnitude_usgs.max()
+)
+
+ax.plot(
+    [lo, hi],
+    [lo, hi],
+    "k--",
+    label="1:1"
+)
+
+ax.set_xlabel("SCSN magnitude")
+ax.set_ylabel("USGS magnitude")
+
+ax.legend()
+ax.grid(alpha=0.25)
+
+savefig(
+    fig,
+    4,
+    "Magnitude comparison for common events"
+)
+
+
+# ============================================================
+# FIGURE 5
+# LOCATION DIFFERENCE
+# ============================================================
+
+lat_diff = (
+    common.latitude_scsn
+    - common.latitude_usgs
+)
+
+lon_diff = (
+    common.longitude_scsn
+    - common.longitude_usgs
+)
+
+distance = haversine_km(
+    common.latitude_scsn,
+    common.longitude_scsn,
+    common.latitude_usgs,
+    common.longitude_usgs
+)
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+ax.hist(
+    distance,
+    bins=40,
+    edgecolor="black"
+)
+
+ax.set_xlabel(
+    "Epicentre separation (km)"
+)
+
+ax.set_ylabel(
+    "Number of common events"
+)
+
+ax.grid(alpha=0.25)
+
+savefig(
+    fig,
+    5,
+    "Location difference for common events"
+)
+
+
+# ============================================================
+# FIGURE 6
+# FINE MAGNITUDE HISTOGRAM
+# ============================================================
+
+fig, ax = plt.subplots(figsize=(9, 5))
+
+bins = np.arange(
+    np.floor(sc.magnitude.min() * 100) / 100,
+    np.ceil(sc.magnitude.max() * 100) / 100
+    + 0.01,
+    0.01
+)
+
+ax.hist(
+    sc.magnitude,
+    bins=bins,
+    edgecolor="black",
+    linewidth=0.25
+)
+
+ax.set_xlabel("Magnitude")
+ax.set_ylabel("Count")
+
+ax.grid(alpha=0.2)
+
+savefig(
+    fig,
+    6,
+    "Fine-binned magnitude histogram"
+)
+
+
+# ============================================================
+# FIGURE 7
+# REPORTING ARTIFACT — DAILY RATE
+# ============================================================
+
+daily = (
+    sc
+    .set_index("time")
+    .resample("D")
+    .size()
+)
+
+fig, ax = plt.subplots(figsize=(11, 4))
+
+ax.plot(
+    daily.index,
+    daily.values,
+    linewidth=0.8
+)
+
+ax.set_xlabel("Date")
+ax.set_ylabel("Events per day")
+
+ax.grid(alpha=0.25)
+
+savefig(
+    fig,
+    7,
+    "Catalog reporting-rate diagnostic"
+)
+
+
+# ============================================================
+# FIGURE 8
+# FMD
+# ============================================================
+
+m = sc.magnitude.to_numpy()
+
+mc = maxc(m)
+
+values = np.arange(
+    np.floor(m.min() / 0.1) * 0.1,
+    np.ceil(m.max() / 0.1) * 0.1 + 0.1,
+    0.1
+)
+
+incremental = []
+
+cumulative = []
+
+for v in values:
+
+    incremental.append(
+        np.sum(
+            (
+                m >= v - 0.05
+            )
+            &
+            (
+                m < v + 0.05
+            )
+        )
+    )
+
+    cumulative.append(
+        np.sum(m >= v)
+    )
+
+incremental = np.asarray(incremental)
+cumulative = np.asarray(cumulative)
+
+fig, ax = plt.subplots(figsize=(8, 6))
+
+mask1 = incremental > 0
+mask2 = cumulative > 0
+
+ax.semilogy(
+    values[mask1],
+    incremental[mask1],
+    "o",
+    label="Non-cumulative"
+)
+
+ax.semilogy(
+    values[mask2],
+    cumulative[mask2],
+    "s-",
+    label="Cumulative"
+)
+
+ax.axvline(
+    mc,
+    linestyle="--",
+    label=f"Mc = {mc:.2f}"
+)
+
+ax.set_xlabel("Magnitude")
+ax.set_ylabel("Number of events")
+
+ax.legend()
+ax.grid(
+    alpha=0.25,
+    which="both"
+)
+
+savefig(
+    fig,
+    8,
+    "Frequency-magnitude distribution"
+)
+
+
+# ============================================================
+# FIGURE 9
+# Mc BY MULTIPLE METHODS
+# ============================================================
+
 methods = {}
 
-# MAXC
-try:
-    methods["MAXC"] = float(mc_maxc(m))
-except Exception as e:
-    print("MAXC failed:", e)
+methods["MAXC"] = mc
 
-# GFT, MBS and EMR from repository
 try:
-    from eq_toolkit.quality.mc import gft, mbs, emr
+
+    from eq_toolkit.quality.mc import (
+        gft,
+        mbs,
+        emr
+    )
 
     for name, func in [
         ("GFT", gft),
         ("MBS", mbs),
-        ("EMR", emr),
+        ("EMR", emr)
     ]:
+
         try:
+
             result = func(m)
 
-            # Some repository functions may return tuples
-            if isinstance(result, tuple):
+            if isinstance(
+                result,
+                tuple
+            ):
                 result = result[0]
 
-            # Make sure result is a number
             if np.isscalar(result):
-                methods[name] = float(result)
-            else:
-                print(f"{name}: returned non-scalar result, skipped")
+
+                methods[name] = float(
+                    result
+                )
 
         except Exception as e:
-            print(f"{name} failed:", e)
+
+            print(
+                f"{name} failed:",
+                e
+            )
 
 except Exception as e:
-    print("Could not import Mc methods:", e)
 
-# Plot the available Mc estimates
-fig, ax = plt.subplots(figsize=(8, 4))
-
-for name, value in methods.items():
-    ax.scatter(
-        value,
-        0,
-        s=90,
-        label=f"{name}: {value:.2f}"
+    print(
+        "Mc methods import failed:",
+        e
     )
 
+
+fig, ax = plt.subplots(
+    figsize=(9, 4)
+)
+
+names = list(methods.keys())
+vals = list(methods.values())
+
+ax.scatter(
+    vals,
+    np.zeros(len(vals)),
+    s=100
+)
+
+for name, value in methods.items():
+
+    ax.annotate(
+        f"{name}\n{value:.2f}",
+        (value, 0),
+        xytext=(0, 20),
+        textcoords="offset points",
+        ha="center"
+    )
+
+ax.set_xlabel(
+    "Magnitude of completeness, Mc"
+)
+
 ax.set_yticks([])
-ax.set_xlabel("Magnitude of completeness (Mc)")
-ax.set_title("Mc estimates by several methods")
 
-if methods:
-    ax.legend()
+ax.grid(
+    axis="x",
+    alpha=0.25
+)
 
-ax.grid(axis="x", alpha=0.25)
+savefig(
+    fig,
+    9,
+    "Mc by several methods"
+)
 
-save(fig, 9, "Mc by several methods")
 
-# 10. b against Mc
-mcs=np.arange(np.floor(mc*10)/10, np.floor(m.max()*10)/10+.01,.1)
-bs=[]; sig=[]
-for q in mcs:
-    try:
-        x=m[m>=q]
-        if len(x)>=10:
-            bb=b_aki(m,q); bs.append(bb); sig.append(2.3*bb*bb*np.std(x,ddof=1)/np.sqrt(len(x)*(len(x)-1)))
-        else: bs.append(np.nan);sig.append(np.nan)
-    except: bs.append(np.nan);sig.append(np.nan)
-fig,ax=plt.subplots(figsize=(8,5))
-ax.errorbar(mcs,bs,yerr=sig,fmt="o-",capsize=2)
-ax.axvline(mc,ls=":",label=f"selected Mc={mc:.2f}")
-ax.set(xlabel="Mc threshold",ylabel="b-value",title="b-value versus Mc");ax.legend();ax.grid(alpha=.25)
-save(fig,10,"b versus Mc")
+# ============================================================
+# FIGURE 10
+# b VS Mc
+# ============================================================
 
-# 11. Mc through an aftershock sequence
-fig,ax=plt.subplots(figsize=(9,5))
-if "time" in cat1 and len(cat1)>30:
-    win=max(30,len(cat1)//20)
-    t=[]; mm=[]
-    for i in range(win,len(cat1),max(1,win//2)):
-        mm.append(mc_maxc(cat1.magnitude.iloc[i-win:i].to_numpy()))
-        t.append(cat1.time.iloc[i])
-    ax.plot(t,mm,"o-")
-else:
-    ax.text(.5,.5,"Need a sufficiently long aftershock catalog",ha="center")
-ax.set(xlabel="Time",ylabel="Mc",title="Mc through an aftershock sequence")
-ax.grid(alpha=.25);save(fig,11,"Mc in an aftershock sequence")
+mc_values = np.arange(
+    max(
+        1.5,
+        np.floor(mc * 10) / 10
+    ),
+    np.floor(
+        m.max() * 10
+    ) / 10 + 0.1,
+    0.1
+)
 
-# 12. Spatial Mc map
-fig,ax=plt.subplots(figsize=(8,6))
-if {"latitude","longitude","magnitude"}.issubset(cat1.columns):
-    x=cat1.dropna(subset=["latitude","longitude","magnitude"]).copy()
-    nx,ny=5,5
-    x["ix"]=pd.cut(x.longitude,nx,labels=False,duplicates="drop")
-    x["iy"]=pd.cut(x.latitude,ny,labels=False,duplicates="drop")
-    xx=x.groupby(["ix","iy"],observed=True).agg(lon=("longitude","mean"),lat=("latitude","mean"),mc=("magnitude",lambda z:mc_maxc(z) if len(z)>=10 else np.nan)).dropna()
-    sc=ax.scatter(xx.lon,xx.lat,c=xx.mc,s=100)
-    fig.colorbar(sc,ax=ax,label="Mc")
-ax.set(xlabel="Longitude",ylabel="Latitude",title="Spatial Mc map");ax.grid(alpha=.25)
-save(fig,12,"Mc in space")
+b_values = []
+b_sigma = []
 
-# 13. Spatial b with uncertainty
-fig,ax=plt.subplots(figsize=(8,6))
-if {"latitude","longitude","magnitude"}.issubset(cat1.columns):
-    x=cat1.dropna(subset=["latitude","longitude","magnitude"]).copy()
-    x["ix"]=pd.cut(x.longitude,5,labels=False,duplicates="drop")
-    x["iy"]=pd.cut(x.latitude,5,labels=False,duplicates="drop")
-    rows=[]
-    for (ix,iy),g in x.groupby(["ix","iy"],observed=True):
-        if len(g)>=10:
-            q=mc_maxc(g.magnitude.to_numpy())
-            if np.sum(g.magnitude>=q)>=5:
-                bb=b_aki(g.magnitude.to_numpy(),q)
-                xx=g.magnitude[g.magnitude>=q]
-                se=2.3*bb*bb*np.std(xx,ddof=1)/np.sqrt(len(xx)*(len(xx)-1))
-                rows.append((g.longitude.mean(),g.latitude.mean(),bb,se))
-    if rows:
-        z=pd.DataFrame(rows,columns=["lon","lat","b","sigma"])
-        sc=ax.scatter(z.lon,z.lat,c=z.b,s=120)
-        ax.errorbar(z.lon,z.lat,yerr=z.sigma*.02,fmt="none",alpha=.4)
-        fig.colorbar(sc,ax=ax,label="b-value")
-ax.set(xlabel="Longitude",ylabel="Latitude",title="Spatial b-value with uncertainty");ax.grid(alpha=.25)
-save(fig,13,"b in space with uncertainty")
+for q in mc_values:
 
-# ---------------- 14-23 ETAS MODEL FIGURES ----------------
-t, mag = simulate_etas()
+    x = m[m >= q]
 
-# 14. Omori kernel + productivity
-tau=np.logspace(-3,2,400)
-g=(P-1)*C**(P-1)*(tau+C)**(-P)
-prod=10**(ALPHA*(np.array([3,4,5])-M0))
-fig,ax=plt.subplots(figsize=(8,5))
-ax.loglog(tau,g,label="Omori decay")
-ax.set(xlabel="Time since trigger",ylabel="Normalized triggering kernel")
-ax2=ax.twinx(); ax2.plot([3,4,5],prod,"o--",label="Productivity")
-ax2.set_ylabel("Expected productivity factor")
-save(fig,14,"Triggering kernel: Omori decay and productivity relation")
+    if len(x) >= 20:
 
-# 15. Conditional intensity, background vs triggered
-from eq_toolkit.model.intensity import temporal_intensity
-times=t
-lam=temporal_intensity(times,mag,mu=MU,K=K,alpha=ALPHA,M0=M0,c=C,p=P)
-bg=np.full_like(lam,MU)
-fig,ax=plt.subplots(figsize=(10,5))
-ax.plot(times,lam,label="Total conditional intensity")
-ax.plot(times,bg,"--",label="Background")
-ax.plot(times,np.maximum(lam-bg,1e-12),label="Triggered contribution")
-ax.set(xlabel="Time",ylabel="Intensity");ax.legend();ax.grid(alpha=.25)
-save(fig,15,"Conditional intensity")
+        b = aki_b(x, q)
 
-# 16. Simulated catalog beside real catalog
-fig,ax=plt.subplots(figsize=(10,5))
-ax.scatter(cat1.time,cat1.magnitude,s=8,alpha=.5,label="Real catalog")
-real_start=cat1.time.min()
-sim_dates=real_start+pd.to_timedelta(t,unit="D")
-ax.scatter(sim_dates,mag,s=8,alpha=.5,label="ETAS simulated")
-ax.set(xlabel="Time",ylabel="Magnitude");ax.legend();ax.grid(alpha=.25)
-save(fig,16,"Simulated catalog versus real catalog")
+        sigma = (
+            2.3
+            * b
+            * b
+            * np.std(
+                x,
+                ddof=1
+            )
+            / np.sqrt(
+                len(x)
+                * (len(x) - 1)
+            )
+        )
 
-# 17. Log-likelihood versus EM iteration (diagnostic trace)
-from eq_toolkit.model.likelihood import temporal_log_likelihood
-p0=np.array([MU*0.5,K*0.7,ALPHA*0.8,C*1.8,P*1.15])
-p1=np.array([MU,K,ALPHA,C,P])
-traces=np.linspace(p0,p1,25)
-ll=[]
-for q in traces:
-    try:
-        ll.append(temporal_log_likelihood(t,mag,mu=q[0],K=q[1],alpha=q[2],M0=M0,c=q[3],p=q[4]))
-    except: ll.append(np.nan)
-fig,ax=plt.subplots(figsize=(7,5))
-ax.plot(range(1,len(ll)+1),ll,"o-")
-ax.set(xlabel="EM iteration",ylabel="Log-likelihood",title="Log-likelihood versus EM iteration")
-ax.grid(alpha=.25);save(fig,17,"EM log-likelihood convergence")
+        b_values.append(b)
+        b_sigma.append(sigma)
 
-# 18. Parameter traces
-fig,axs=plt.subplots(5,1,figsize=(8,10),sharex=True)
-names=["mu","K","alpha","c","p"]
-for j,name in enumerate(names): axs[j].plot(range(1,len(traces)+1),traces[:,j],"o-");axs[j].set_ylabel(name);axs[j].grid(alpha=.2)
-axs[-1].set_xlabel("Iteration")
-save(fig,18,"Parameter traces across iterations")
-
-# 19. Synthetic recovery with repeated restarts
-starts=[np.array([.04,.15,.5,.02,1.05]),np.array([.12,.4,1.2,.005,1.3]),np.array([.07,.3,.9,.03,1.2])]
-ests=[]
-for s in starts:
-    # controlled perturbation around known truth for a restart/recovery diagnostic
-    est=s+(p1-s)*(0.75+0.15*RNG.random(5))
-    ests.append(est)
-ests=np.array(ests)
-fig,axs=plt.subplots(1,5,figsize=(13,3))
-for j,nm in enumerate(names):
-    axs[j].errorbar(np.arange(len(ests)),ests[:,j],yerr=np.std(ests[:,j])*.15+1e-9,fmt="o")
-    axs[j].axhline(p1[j],ls="--",label="true")
-    axs[j].set_title(nm);axs[j].set_xticks([])
-axs[0].legend()
-save(fig,19,"Synthetic parameter recovery")
-
-# 20. Transformed-time residuals + exponential reference
-from eq_toolkit.model.residuals import transformed_time_residuals, ks_test_residuals
-res=transformed_time_residuals(t,mag,mu=MU,K=K,alpha=ALPHA,M0=M0,c=C,p=P)
-D,pv=ks_test_residuals(res)
-fig,ax=plt.subplots(figsize=(7,5))
-x=np.sort(res); y=np.arange(1,len(x)+1)/len(x)
-ax.step(x,y,where="post",label="Observed transformed residuals")
-xx=np.linspace(0,max(x.max(),1),300);ax.plot(xx,1-np.exp(-xx),"--",label="Exponential(1)")
-ax.set(xlabel="Transformed time",ylabel="CDF",title=f"Transformed-time residual diagnostic (KS p={pv:.3g})")
-ax.legend();ax.grid(alpha=.25);save(fig,20,"Transformed-time residuals")
-
-# 21. Declustered versus original
-from eq_toolkit.calibrate.estep import compute_estep
-es=compute_estep(t,mag,mu=MU,K=K,alpha=ALPHA,c=C,p=P,m0=M0)
-background=es.bg>=0.5
-fig,ax=plt.subplots(figsize=(9,5))
-ax.scatter(t,mag,s=8,alpha=.2,label="Original")
-ax.scatter(t[background],mag[background],s=16,label="Background / declustered")
-ax.set(xlabel="Time",ylabel="Magnitude");ax.legend();ax.grid(alpha=.25)
-save(fig,21,"Declustered against original catalog")
-
-# 22. Triggering genealogy
-rho=es.rho
-parents=np.argmax(rho,axis=1)
-prob=np.max(rho,axis=1)
-fig,ax=plt.subplots(figsize=(8,7))
-for i in range(1,len(t)):
-    j=parents[i]
-    if prob[i]>.2:
-        ax.plot([t[j],t[i]],[mag[j],mag[i]],alpha=.12,linewidth=.6)
-sc=ax.scatter(t,mag,c=prob,s=12)
-fig.colorbar(sc,ax=ax,label="Most-likely parent probability")
-ax.set(xlabel="Time",ylabel="Magnitude",title="Triggering genealogy")
-ax.grid(alpha=.2);save(fig,22,"Triggering genealogy")
-
-# 23. N-test on held-out years
-if "time" in cat1 and len(cat1)>10:
-    yrs=cat1.time.dt.year
-    unique=np.sort(yrs.unique())
-    if len(unique)>=3:
-        test_year=unique[-1]
-        train=cat1[yrs<test_year]
-        test=cat1[yrs==test_year]
-        expected=len(train)/max((train.time.max()-train.time.min()).days/365.25,1/365.25)
-        observed=len(test)
-        z=(observed-expected)/np.sqrt(max(expected,1))
-        pval=2*stats.norm.sf(abs(z))
-        fig,ax=plt.subplots(figsize=(7,5))
-        ax.bar(["Expected","Observed"],[expected,observed])
-        ax.set_ylabel("Number of events")
-        ax.set_title(f"N-test: held-out year {test_year}; z={z:.2f}, p={pval:.3g}")
-        ax.grid(axis="y",alpha=.25);save(fig,23,"N-test on held-out year")
     else:
-        print("FIG 23 skipped: catalog needs at least 3 calendar years.")
-else:
-    print("FIG 23 skipped: time column required.")
 
-print(f"\nFinished. Figures are in: {OUT.resolve()}")
-print("Check the console for skipped figures.")
+        b_values.append(np.nan)
+        b_sigma.append(np.nan)
+
+
+fig, ax = plt.subplots(
+    figsize=(8, 5)
+)
+
+ax.errorbar(
+    mc_values,
+    b_values,
+    yerr=b_sigma,
+    fmt="o-",
+    capsize=3
+)
+
+ax.axvline(
+    mc,
+    linestyle="--",
+    label=f"Selected Mc={mc:.2f}"
+)
+
+ax.set_xlabel("Mc threshold")
+ax.set_ylabel("b-value")
+
+ax.legend()
+ax.grid(alpha=0.25)
+
+savefig(
+    fig,
+    10,
+    "b-value versus Mc"
+)
+
+
+# ============================================================
+# FIGURE 11
+# Mc THROUGH AFTERSHOCK SEQUENCE
+# ============================================================
+
+mainshock_index = sc.magnitude.idxmax()
+
+mainshock = sc.loc[
+    mainshock_index
+]
+
+t0 = mainshock.time
+
+after = sc[
+    (
+        sc.time >= t0
+    )
+    &
+    (
+        sc.time <=
+        t0 + pd.Timedelta(days=60)
+    )
+].copy()
+
+print(
+    "\nLargest-event aftershock window:",
+    len(after),
+    "events"
+)
+
+window = 50
+
+times11 = []
+mc11 = []
+
+for i in range(
+    window,
+    len(after),
+    max(10, window // 2)
+):
+
+    subset = after.iloc[
+        i-window:i
+    ]
+
+    if len(subset) >= 20:
+
+        times11.append(
+            subset.time.iloc[-1]
+        )
+
+        mc11.append(
+            maxc(
+                subset.magnitude
+            )
+        )
+
+
+fig, ax = plt.subplots(
+    figsize=(10, 5)
+)
+
+if len(times11) > 0:
+
+    ax.plot(
+        times11,
+        mc11,
+        "o-"
+    )
+
+ax.axvline(
+    t0,
+    linestyle="--",
+    label="Mainshock"
+)
+
+ax.set_xlabel("Time")
+ax.set_ylabel("Mc")
+
+ax.legend()
+ax.grid(alpha=0.25)
+
+savefig(
+    fig,
+    11,
+    "Mc through an aftershock sequence"
+)
+
+
+# ============================================================
+# FIGURE 12
+# SPATIAL Mc
+# ============================================================
+
+sp = sc.dropna(
+    subset=[
+        "latitude",
+        "longitude",
+        "magnitude"
+    ]
+).copy()
+
+# constant-N cells
+N_PER_CELL = 100
+
+sp = sp.sort_values(
+    "longitude"
+)
+
+# spatial grid using quantiles
+sp["xbin"] = pd.qcut(
+    sp.longitude,
+    5,
+    labels=False,
+    duplicates="drop"
+)
+
+sp["ybin"] = pd.qcut(
+    sp.latitude,
+    5,
+    labels=False,
+    duplicates="drop"
+)
+
+rows = []
+
+for (
+    xbin,
+    ybin
+), group in sp.groupby(
+    ["xbin", "ybin"],
+    observed=True
+):
+
+    if len(group) < N_PER_CELL:
+        continue
+
+    group = group.nlargest(
+        N_PER_CELL,
+        "magnitude"
+    )
+
+    # use the lowest 100 magnitude-ranked events
+    # after sorting magnitude
+    group = group.sort_values(
+        "magnitude"
+    )
+
+    q = maxc(
+        group.magnitude
+    )
+
+    rows.append(
+        [
+            group.longitude.mean(),
+            group.latitude.mean(),
+            q,
+            len(group)
+        ]
+    )
+
+mcmap = pd.DataFrame(
+    rows,
+    columns=[
+        "longitude",
+        "latitude",
+        "Mc",
+        "N"
+    ]
+)
+
+fig, ax = plt.subplots(
+    figsize=(8, 6)
+)
+
+if len(mcmap):
+
+    s = ax.scatter(
+        mcmap.longitude,
+        mcmap.latitude,
+        c=mcmap.Mc,
+        s=120,
+        cmap="viridis"
+    )
+
+    fig.colorbar(
+        s,
+        ax=ax,
+        label="Mc"
+    )
+
+ax.set_xlabel("Longitude")
+ax.set_ylabel("Latitude")
+
+ax.grid(alpha=0.25)
+
+savefig(
+    fig,
+    12,
+    "Spatial magnitude of completeness"
+)
+
+
+# ============================================================
+# FIGURE 13
+# b IN SPACE + UNCERTAINTY
+# ============================================================
+
+rows = []
+
+for (
+    xbin,
+    ybin
+), group in sp.groupby(
+    ["xbin", "ybin"],
+    observed=True
+):
+
+    if len(group) < N_PER_CELL:
+        continue
+
+    group = group.sort_values(
+        "magnitude"
+    ).tail(N_PER_CELL)
+
+    q = maxc(
+        group.magnitude
+    )
+
+    x = group[
+        group.magnitude >= q
+    ].magnitude.to_numpy()
+
+    if len(x) < 10:
+        continue
+
+    b = aki_b(
+        x,
+        q
+    )
+
+    sigma = (
+        2.3
+        * b
+        * b
+        * np.std(
+            x,
+            ddof=1
+        )
+        / np.sqrt(
+            len(x)
+            * (len(x) - 1)
+        )
+    )
+
+    rows.append(
+        [
+            group.longitude.mean(),
+            group.latitude.mean(),
+            b,
+            sigma
+        ]
+    )
+
+bmap = pd.DataFrame(
+    rows,
+    columns=[
+        "longitude",
+        "latitude",
+        "b",
+        "sigma"
+    ]
+)
+
+fig, ax = plt.subplots(
+    figsize=(8, 6)
+)
+
+if len(bmap):
+
+    s = ax.scatter(
+        bmap.longitude,
+        bmap.latitude,
+        c=bmap.b,
+        s=130,
+        cmap="viridis"
+    )
+
+    fig.colorbar(
+        s,
+        ax=ax,
+        label="b-value"
+    )
+
+    ax.errorbar(
+        bmap.longitude,
+        bmap.latitude,
+        yerr=bmap.sigma * 0.05,
+        fmt="none",
+        alpha=0.5
+    )
+
+ax.set_xlabel("Longitude")
+ax.set_ylabel("Latitude")
+
+ax.grid(alpha=0.25)
+
+savefig(
+    fig,
+    13,
+    "Spatial b-value with uncertainty"
+)
+
+
+# ============================================================
+# FIGURES 14-16
+# FIT REAL ETAS MODEL
+# ============================================================
+
+print("\nPreparing ETAS sequence...")
+
+# Use the largest-event sequence rather than fitting all 9417
+# events. This keeps the O(N^2) E-step computationally feasible.
+
+seq = sc[
+    (
+        sc.time >= t0
+    )
+    &
+    (
+        sc.time <=
+        t0 + pd.Timedelta(days=30)
+    )
+].copy()
+
+# Apply completeness threshold
+seq = seq[
+    seq.magnitude >= mc
+].copy()
+
+# Keep manageable size
+MAX_EVENTS = 800
+
+if len(seq) > MAX_EVENTS:
+
+    seq = seq.head(
+        MAX_EVENTS
+    )
+
+print(
+    "ETAS fitting sequence:",
+    len(seq),
+    "events"
+)
+
+# convert time to days
+times = (
+    (
+        seq.time
+        - seq.time.iloc[0]
+    )
+    / pd.Timedelta(days=1)
+).to_numpy()
+
+mags = (
+    seq.magnitude
+    .to_numpy()
+)
+
+M0 = mc
+
+duration = (
+    times[-1]
+    - times[0]
+)
+
+# ------------------------------------------------------------
+# IMPORT ETAS MODEL
+# ------------------------------------------------------------
+
+from eq_toolkit.calibrate.em import (
+    run_em,
+    run_em_restarts
+)
+
+from eq_toolkit.calibrate.mstep import (
+    ETASParameters
+)
+
+from eq_toolkit.model.intensity import (
+    temporal_intensity
+)
+
+# ------------------------------------------------------------
+# INITIAL PARAMETER SETS
+# ------------------------------------------------------------
+
+rate = len(times) / max(
+    duration,
+    1e-6
+)
+
+starts = [
+
+    ETASParameters(
+        mu=max(rate * 0.3, 1e-4),
+        K=0.1,
+        alpha=0.5,
+        c=0.01,
+        p=1.2
+    ),
+
+    ETASParameters(
+        mu=max(rate * 0.5, 1e-4),
+        K=0.2,
+        alpha=0.8,
+        c=0.01,
+        p=1.5
+    ),
+
+    ETASParameters(
+        mu=max(rate * 0.7, 1e-4),
+        K=0.3,
+        alpha=1.0,
+        c=0.05,
+        p=1.8
+    )
+]
+
+print(
+    "\nRunning ETAS EM..."
+)
+
+result = run_em_restarts(
+    times,
+    mags,
+    starts,
+    m0=M0,
+    max_iterations=30,
+    tolerance=1e-4
+)
+
+params = result.parameters
+
+print("\nFINAL ETAS PARAMETERS")
+
+print(
+    "mu    =",
+    params.mu
+)
+
+print(
+    "K     =",
+    params.K
+)
+
+print(
+    "alpha =",
+    params.alpha
+)
+
+print(
+    "c     =",
+    params.c
+)
+
+print(
+    "p     =",
+    params.p
+)
+
+print(
+    "iterations =",
+    result.iterations
+)
+
+print(
+    "converged =",
+    result.converged
+)
+
+
+# ============================================================
+# FIGURE 14
+# OMORI + PRODUCTIVITY
+# ============================================================
+
+tau = np.logspace(
+    -4,
+    2,
+    400
+)
+
+omori = (
+    (params.p - 1)
+    * params.c ** (
+        params.p - 1
+    )
+    * (
+        tau + params.c
+    ) ** (-params.p)
+)
+
+magnitudes14 = np.linspace(
+    M0,
+    max(
+        M0 + 3,
+        mags.max()
+    ),
+    100
+)
+
+productivity = (
+    params.K
+    * 10 ** (
+        params.alpha
+        * (
+            magnitudes14
+            - M0
+        )
+    )
+)
+
+fig, ax = plt.subplots(
+    figsize=(9, 5)
+)
+
+ax.loglog(
+    tau,
+    omori,
+    label="Omori decay"
+)
+
+ax.set_xlabel(
+    "Time since triggering event"
+)
+
+ax.set_ylabel(
+    "Normalized Omori kernel"
+)
+
+ax2 = ax.twinx()
+
+ax2.semilogy(
+    magnitudes14,
+    productivity,
+    "--",
+    label="Productivity"
+)
+
+ax2.set_ylabel(
+    "Expected productivity"
+)
+
+savefig(
+    fig,
+    14,
+    "ETAS triggering kernel and productivity"
+)
+
+
+# ============================================================
+# FIGURE 15
+# CONDITIONAL INTENSITY
+# ============================================================
+
+lam = temporal_intensity(
+    times,
+    mags,
+    mu=params.mu,
+    K=params.K,
+    alpha=params.alpha,
+    M0=M0,
+    c=params.c,
+    p=params.p
+)
+
+background = np.full(
+    len(lam),
+    params.mu
+)
+
+triggered = np.maximum(
+    lam - background,
+    1e-12
+)
+
+fig, ax = plt.subplots(
+    figsize=(10, 5)
+)
+
+ax.plot(
+    times,
+    lam,
+    label="Total conditional intensity"
+)
+
+ax.plot(
+    times,
+    background,
+    "--",
+    label="Background"
+)
+
+ax.plot(
+    times,
+    triggered,
+    label="Triggered component"
+)
+
+ax.set_xlabel(
+    "Time since start (days)"
+)
+
+ax.set_ylabel(
+    "Conditional intensity"
+)
+
+ax.legend()
+
+ax.grid(alpha=0.25)
+
+savefig(
+    fig,
+    15,
+    "Conditional intensity: background and triggering"
+)
+
+
+# ============================================================
+# FIGURE 16
+# REAL VS SIMULATED CATALOG
+# ============================================================
+
+def simulate_etas(
+    duration,
+    mu,
+    K,
+    alpha,
+    M0,
+    c,
+    p,
+    nmax=1000,
+    seed=42
+):
+
+    rng = np.random.default_rng(
+        seed
+    )
+
+    times_sim = list(
+        rng.uniform(
+            0,
+            duration,
+            rng.poisson(
+                max(mu * duration, 1)
+            )
+        )
+    )
+
+    mags_sim = list(
+        M0
+        + rng.exponential(
+            0.5,
+            len(times_sim)
+        )
+    )
+
+    i = 0
+
+    while (
+        i < len(times_sim)
+        and len(times_sim) < nmax
+    ):
+
+        ti = times_sim[i]
+        mi = mags_sim[i]
+
+        productivity = (K* 10 ** (alpha* (mi - M0)) )
+
+        nk = rng.poisson(
+            max(
+                productivity,
+                0
+            )
+        )
+
+        for _ in range(nk):
+
+            u = rng.random()
+
+            if p <= 1:
+                continue
+
+            delay = (c* ((1 - u)** (-1/ (p - 1))- 1))
+
+            tj = ti + delay
+
+            if tj < duration:
+
+                times_sim.append(tj)
+
+                mags_sim.append(M0+ rng.exponential(0.5))
+
+                if (len(times_sim)>= nmax):
+                    break
+
+        i += 1
+
+    order = np.argsort(times_sim)
+
+    return (
+        np.asarray(
+            times_sim
+        )[order],
+        np.asarray(
+            mags_sim
+        )[order]
+    )
+
+
+sim_t, sim_m = simulate_etas(
+    duration,
+    params.mu,
+    params.K,
+    params.alpha,
+    M0,
+    params.c,
+    params.p,
+    nmax=len(seq),
+    seed=42
+)
+
+fig, ax = plt.subplots(
+    figsize=(11, 5)
+)
+
+ax.scatter(
+    times,
+    mags,
+    s=12,
+    alpha=0.6,
+    label="Real SCSN sequence"
+)
+
+ax.scatter(
+    sim_t,
+    sim_m,
+    s=12,
+    alpha=0.6,
+    label="ETAS simulated sequence"
+)
+
+ax.set_xlabel(
+    "Time since sequence start (days)"
+)
+
+ax.set_ylabel(
+    "Magnitude"
+)
+
+ax.legend()
+
+ax.grid(alpha=0.25)
+
+savefig(
+    fig,
+    16,
+    "Real sequence versus ETAS simulated catalog"
+)
+
+
+# ============================================================
+# FINAL REPORT
+# ============================================================
+
+print("\n" + "=" * 60)
+print("FIGURES 01-16 COMPLETE")
+print("=" * 60)
+
+for i in range(1, 17):
+
+    p = OUT / f"fig{i:02d}.png"
+
+    print(
+        f"{i:02d}:",
+        "OK" if p.exists() else "MISSING"
+    )
+
+print(
+    "\nOutput directory:"
+)
+
+print(
+    OUT.resolve()
+)
