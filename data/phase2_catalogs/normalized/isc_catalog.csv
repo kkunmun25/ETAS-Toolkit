@@ -1,0 +1,6 @@
+time,latitude,longitude,depth,magnitude,magnitude_type,source_agency,event_id
+2024-01-01T16:27:31.516,33.5417,-118.3733,12.2,4.0,Mwr,ISC,636374021
+,,,,,,,# Agencies whose data contributed towards the results of this search:
+,,,,,,,"# IDC       International Data Centre, CTBTO                                                 Austria"
+,,,,,,,# ISC       International Seismological Centre                                               United Kingdom
+,,,,,,,# NEIC      National Earthquake Information Center                                           U.S.A.

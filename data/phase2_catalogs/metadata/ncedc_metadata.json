@@ -1,0 +1,13 @@
+{
+    "source": "NCEDC",
+    "source_type": "FDSN API",
+    "region": "California",
+    "start_time": "2024-01-01",
+    "end_time": "2024-01-02",
+    "minimum_magnitude": 3.0,
+    "event_count": 0,
+    "status": "failed",
+    "output_file": null,
+    "error": "('Connection aborted.', ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None))",
+    "download_time_utc": "2026-08-29T19:36:23.633314+00:00"
+}

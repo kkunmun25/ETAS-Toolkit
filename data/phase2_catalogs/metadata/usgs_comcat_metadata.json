@@ -1,0 +1,13 @@
+{
+    "source": "USGS_ComCat",
+    "source_type": "API",
+    "region": "California",
+    "start_time": "2024-01-01",
+    "end_time": "2024-01-02",
+    "minimum_magnitude": 3.0,
+    "event_count": 1,
+    "status": "success",
+    "output_file": "C:\\Users\\tapas\\Desktop\\Earthquake_ETAS_Toolkit_Project\\data\\phase2_catalogs\\normalized\\usgs_comcat_catalog.csv",
+    "error": null,
+    "download_time_utc": "2026-08-29T19:35:16.076026+00:00"
+}

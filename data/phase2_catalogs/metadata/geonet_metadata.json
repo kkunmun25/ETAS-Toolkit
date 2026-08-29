@@ -1,0 +1,13 @@
+{
+    "source": "GeoNet",
+    "source_type": "WFS API",
+    "region": "New Zealand",
+    "start_time": "2024-01-01",
+    "end_time": "2024-01-02",
+    "minimum_magnitude": 3.0,
+    "event_count": 0,
+    "status": "failed",
+    "output_file": null,
+    "error": "HTTPSConnectionPool(host='wfs.geonet.org.nz', port=443): Max retries exceeded with url: /geonet/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=geonet%3Aquake_search_v1&outputFormat=csv&cql_filter=magnitude%3E%3D3.0+AND+origintime%3E%3D%272024-01-01%27+AND+origintime%3C%272024-01-02%27+AND+BBOX%28origin_geom%2C170.0%2C-48.0%2C180.0%2C-34.0%29 (Caused by ConnectTimeoutError(<HTTPSConnection(host='wfs.geonet.org.nz', port=443) at 0x259e22542d0>, 'Connection to wfs.geonet.org.nz timed out. (connect timeout=60)'))",
+    "download_time_utc": "2026-08-29T19:37:06.381987+00:00"
+}

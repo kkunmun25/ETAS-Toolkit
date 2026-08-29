@@ -1,0 +1,13 @@
+{
+    "source": "AUTH_Greece",
+    "source_type": "Scraped/Bulk",
+    "region": "Greece",
+    "start_time": "2024-01-01",
+    "end_time": "2024-01-02",
+    "minimum_magnitude": 3.0,
+    "event_count": 0,
+    "status": "failed",
+    "output_file": null,
+    "error": "HTTPSConnectionPool(host='seismo.auth.gr', port=443): Max retries exceeded with url: /wp-content/uploads/2023/03/seiscat.dat (Caused by ConnectTimeoutError(<HTTPSConnection(host='seismo.auth.gr', port=443) at 0x216e945e5d0>, 'Connection to seismo.auth.gr timed out. (connect timeout=30)'))",
+    "download_time_utc": "2026-08-29T19:15:42.602899+00:00"
+}

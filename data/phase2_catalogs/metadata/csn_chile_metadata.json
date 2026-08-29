@@ -1,0 +1,13 @@
+{
+    "source": "CSN_Chile",
+    "source_type": "Scraper",
+    "region": "Chile",
+    "start_time": "2024-01-01",
+    "end_time": "2024-01-02",
+    "minimum_magnitude": 3.0,
+    "event_count": 17667,
+    "status": "success",
+    "output_file": "C:\\Users\\tapas\\Desktop\\Earthquake_ETAS_Toolkit_Project\\data\\phase2_catalogs\\normalized\\csn_chile_catalog.csv",
+    "error": null,
+    "download_time_utc": "2026-08-29T19:39:47.831728+00:00"
+}

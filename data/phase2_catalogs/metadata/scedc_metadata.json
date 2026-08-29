@@ -1,0 +1,13 @@
+{
+    "source": "SCEDC",
+    "source_type": "FDSN API",
+    "region": "California",
+    "start_time": "2024-01-01",
+    "end_time": "2024-01-02",
+    "minimum_magnitude": 3.0,
+    "event_count": 0,
+    "status": "failed",
+    "output_file": null,
+    "error": "maximum recursion depth exceeded",
+    "download_time_utc": "2026-08-29T18:50:23.331078+00:00"
+}
