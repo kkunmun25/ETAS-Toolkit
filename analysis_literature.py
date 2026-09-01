@@ -8,34 +8,66 @@ from scipy.optimize import curve_fit
 # SETTINGS
 # ============================================================
 
-CATALOG = "usgs_sc_same_region.csv"
+CATALOG = "sc-catalog.csv"
 OUTDIR = "figures"
 os.makedirs(OUTDIR, exist_ok=True)
+
+
+# Inspect the raw SCSN file
+with open("sc-catalog.txt", "r", errors="ignore") as f:
+    lines = f.readlines()
+
+print("Total lines:", len(lines))
+
+for i, line in enumerate(lines[:30]):
+    print(i, repr(line))
+
+# Show lines containing likely earthquake data
+for i, line in enumerate(lines):
+    if "</PRE>" in line or "DATE" in line.upper() or "TIME" in line.upper():
+        print(i, repr(line[:300]))
+
+import pandas as pd
+import re
+
+records = []
+
+with open("sc-catalog.txt", "r", errors="ignore") as f:
+    for line in f:
+        line = line.strip()
+
+        # Keep only earthquake data rows beginning with YYYY/MM/DD
+        if re.match(r"^\d{4}/\d{2}/\d{2}", line):
+            parts = line.split()
+
+            # Corrected indices based on raw file inspection:
+            # 0:Date, 1:Time, 2:ET, 3:GT, 4:MAG, 5:M, 6:LAT, 7:LON, 8:DEPTH, 9:Q, 10:EVID
+            records.append({
+                "time": parts[0] + " " + parts[1],
+                "magnitude": float(parts[4]),
+                "latitude": float(parts[6]),
+                "longitude": float(parts[7]),
+                "depth": float(parts[8]),
+                "event_id": parts[10]
+            })
+
+df = pd.DataFrame(records)
+
+# Convert time
+df["time"] = pd.to_datetime(df["time"], format="%Y/%m/%d %H:%M:%S.%f")
+
+print("DF shape:", df.shape)
+df.head()
+df.tail()
+
+print("\nDF columns:")
+print(df.columns.tolist())            
 
 # ============================================================
 # LOAD CATALOG
 # ============================================================
 
-df = pd.read_csv(CATALOG)
 
-df["time"] = pd.to_datetime(
-    df["time"],
-    format="mixed",
-    utc=True
-)
-
-df["magnitude"] = pd.to_numeric(df["magnitude"], errors="coerce")
-
-df = df.dropna(
-    subset=["time", "magnitude", "latitude", "longitude", "depth"]
-).sort_values("time").reset_index(drop=True)
-
-print("=" * 70)
-print("CATALOG")
-print("=" * 70)
-print("Events:", len(df))
-print("Time:", df["time"].min(), "to", df["time"].max())
-print("Magnitude:", df["magnitude"].min(), "to", df["magnitude"].max())
 
 
 # ============================================================
