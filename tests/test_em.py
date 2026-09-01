@@ -437,3 +437,51 @@ def test_em_end_to_end_synthetic_catalog():
     assert result.bg.shape == (
         len(times),
     )                    
+
+
+def test_run_em_respects_max_iterations():
+
+    times = np.array([0.0, 1.0, 2.0, 3.0])
+    magnitudes = np.array([2.0, 2.5, 3.0, 2.2])
+
+    initial = ETASParameters(
+        mu=0.2,
+        K=0.3,
+        alpha=0.5,
+        c=0.1,
+        p=1.2,
+    )
+
+    result = run_em(
+        times,
+        magnitudes,
+        initial,
+        max_iterations=2,
+    )
+
+    assert result.iterations <= 2
+
+
+def test_run_em_reports_valid_convergence_state():
+
+    times = np.array([0.0, 1.0, 2.0, 3.0])
+    magnitudes = np.array([2.0, 2.5, 3.0, 2.2])
+
+    initial = ETASParameters(
+        mu=0.2,
+        K=0.3,
+        alpha=0.5,
+        c=0.1,
+        p=1.2,
+    )
+
+    result = run_em(
+        times,
+        magnitudes,
+        initial,
+        max_iterations=10,
+    )
+
+    assert isinstance(result.converged, (bool, np.bool_))
+    assert result.iterations >= 1
+    assert np.isfinite(result.log_likelihood)    
