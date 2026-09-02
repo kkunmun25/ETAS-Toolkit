@@ -13,6 +13,11 @@ OUTDIR = "figures"
 os.makedirs(OUTDIR, exist_ok=True)
 
 
+# ============================================================
+# LOAD CATALOG
+# ============================================================
+
+
 # Inspect the raw SCSN file
 with open("sc-catalog.txt", "r", errors="ignore") as f:
     lines = f.readlines()
@@ -62,13 +67,6 @@ df.tail()
 
 print("\nDF columns:")
 print(df.columns.tolist())            
-
-# ============================================================
-# LOAD CATALOG
-# ============================================================
-
-
-
 
 # ============================================================
 # COMMON FMD FUNCTION

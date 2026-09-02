@@ -8,6 +8,7 @@ from eq_toolkit.calibrate.estep import compute_estep
 from eq_toolkit.calibrate.mstep import (
     ETASParameters,
     expected_complete_log_likelihood,
+    observed_log_likelihood,
     update_K,
     update_alpha,
     update_c,
@@ -204,8 +205,7 @@ def run_em(
             "Catalog duration must be positive."
         )
 
-    previous_q = -np.inf
-
+    
     rho = np.zeros(
         (len(times), len(times)),
         dtype=float,
@@ -218,6 +218,8 @@ def run_em(
 
     converged = False
     iterations = 0
+    previous_ll = -np.inf
+
 
     for iteration in range(1, max_iterations + 1):
 
@@ -286,15 +288,14 @@ def run_em(
 
         new_parameters.validate()
 
+        
         # =====================================================
-        # Q-FUNCTION
+        # OBSERVED LOG-LIKELIHOOD
         # =====================================================
 
-        q_value = expected_complete_log_likelihood(
+        log_likelihood = observed_log_likelihood(
             times,
             magnitudes,
-            rho,
-            bg,
             mu=new_parameters.mu,
             K=new_parameters.K,
             alpha=new_parameters.alpha,
@@ -307,32 +308,31 @@ def run_em(
         # CONVERGENCE CHECK
         # =====================================================
 
-        if np.isfinite(previous_q):
+        if iteration > 1:
+            
 
-            check_monotonicity(
-                previous_q,
-                q_value,
-                tolerance=1e-10,
+            improvement = log_likelihood - previous_ll
+            
+
+            scale = max(
+                1.0,
+                abs(previous_ll),
             )
-
-            improvement = q_value - previous_q
-
-            scale = max(1.0,abs(previous_q),)
 
             if abs(improvement) <= tolerance * scale:
                 parameters = new_parameters
                 iterations = iteration
                 converged = True
-                previous_q = q_value
+                previous_ll = log_likelihood
                 break
 
-        previous_q = q_value
+        previous_ll = log_likelihood
         parameters = new_parameters
-        iterations = iteration
+        iterations = iteration 
 
     result = EMResult(
         parameters=parameters,
-        log_likelihood=previous_q,
+        log_likelihood=previous_ll,
         iterations=iterations,
         converged=converged,
         rho=rho,

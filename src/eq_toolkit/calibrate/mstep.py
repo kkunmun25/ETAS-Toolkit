@@ -270,139 +270,114 @@ def update_alpha(
     return alpha
 
 def update_c(
-    rho: np.ndarray,
-    times: np.ndarray,
+    rho,
+    times,
+    p,
     *,
-    p: float,
-    c_bounds: tuple[float, float] = (1e-4, 10.0),
-) -> float:
-    """Update the ETAS temporal offset parameter c."""
+    c_min=1e-5,
+    c_max=10.0,
+):
+    """Update c by maximizing the weighted temporal log-kernel."""
 
     rho = np.asarray(rho, dtype=float)
+
+    if np.sum(rho) <= 0:
+        return 0.0001
     times = np.asarray(times, dtype=float)
 
-    n = len(times)
-
-    if rho.shape != (n, n):
-        raise ValueError(
-            "rho must have shape (n_events, n_events)."
-        )
-
-    if n < 2:
-        raise ValueError("At least two events are required.")
-
-    if not np.all(np.isfinite(rho)):
-        raise ValueError("rho contains non-finite values.")
-
-    if np.any(rho < 0):
-        raise ValueError("rho cannot contain negative values.")
-
-    if np.any(np.diff(times) < 0):
-        raise ValueError("times must be sorted chronologically.")
-
-    if p <= 0:
-        raise ValueError("p must be positive.")
-
-    lower, upper = c_bounds
-
-    if lower <= 0 or lower >= upper:
-        raise ValueError("Invalid c bounds.")
-
-    # Child-parent time differences.
     dt = times[:, None] - times[None, :]
 
-    # Only valid parent-child pairs.
-    valid = np.tril(
-        np.ones((n, n), dtype=bool),
-        k=-1,
+    mask = (
+        (rho > 0.0)
+        & (dt > 0.0)
     )
 
-    dt_valid = dt[valid]
-    weights = rho[valid]
+    weights = rho[mask]
+    delays = dt[mask]
 
-    # If there are no expected triggered events,
-    # there is no information for estimating c.
-    if np.sum(weights) <= 0:
-        return float(lower)
+    if weights.size == 0:
+        return c_min
 
-    def negative_objective(c: float) -> float:
-        """Negative weighted temporal log-likelihood."""
+    def objective(c):
+        kernel = (
+            np.log(p - 1.0)
+            + (p - 1.0) * np.log(c)
+            - p * np.log(c + delays)
+        )
 
-        log_kernel = -p * np.log(dt_valid + c)
+        return -np.sum(weights * kernel)
 
-        value = np.sum(weights * log_kernel)
-
-        return -float(value)
+    from scipy.optimize import minimize_scalar
 
     result = minimize_scalar(
-        negative_objective,
-        bounds=(lower, upper),
+        objective,
+        bounds=(c_min, c_max),
         method="bounded",
     )
 
-    if not result.success or not np.isfinite(result.x):
-        raise ValueError(
-            "Numerical optimization failed while updating c."
+    if not result.success:
+        raise RuntimeError(
+            "Optimization of c failed."
         )
 
-    c = float(result.x)
-
-    if not lower <= c <= upper:
-        raise ValueError("Updated c is outside its bounds.")
-
-    return c
+    return float(result.x)
 
 def update_p(
-    rho: np.ndarray,
-    times: np.ndarray,
+    rho,
+    times,
+    c,
     *,
-    c: float,
-    p_bounds: tuple[float, float] = (0.5, 3.0),
-) -> float:
-    """Update the ETAS temporal decay exponent p."""
+    p_min=1.01,
+    p_max=3.0,
+):
+    """Update p by maximizing the weighted temporal log-kernel."""
 
     rho = np.asarray(rho, dtype=float)
+
+    if np.sum(rho) <= 0:
+        return 0.5
     times = np.asarray(times, dtype=float)
-
-    n = len(times)
-
-    if rho.shape != (n, n):
-        raise ValueError(
-            "rho must have shape (n_events, n_events)."
-        )
-
-    if n < 2:
-        raise ValueError("At least two events are required.")
-
-    if not np.all(np.isfinite(rho)):
-        raise ValueError("rho contains non-finite values.")
-
-    if np.any(rho < 0):
-        raise ValueError("rho cannot contain negative values.")
-
-    if np.any(np.diff(times) < 0):
-        raise ValueError("times must be sorted chronologically.")
-
-    if c <= 0:
-        raise ValueError("c must be positive.")
-
-    lower, upper = p_bounds
-
-    if lower <= 0 or lower >= upper:
-        raise ValueError("Invalid p bounds.")
 
     dt = times[:, None] - times[None, :]
 
-    valid = np.tril(
-        np.ones((n, n), dtype=bool),
-        k=-1,
+    mask = (
+        (rho > 0.0)
+        & (dt > 0.0)
     )
 
-    dt_valid = dt[valid]
-    weights = rho[valid]
+    weights = rho[mask]
+    delays = dt[mask]
 
-    if np.sum(weights) <= 0:
-        return float(lower)
+    if weights.size == 0:
+        return p_min
+
+    def objective(p):
+
+        if p <= 1.0:
+            return np.inf
+
+        kernel = (
+            np.log(p - 1.0)
+            + (p - 1.0) * np.log(c)
+            - p * np.log(c + delays)
+        )
+
+        return -np.sum(weights * kernel)
+
+    from scipy.optimize import minimize_scalar
+
+    result = minimize_scalar(
+        objective,
+        bounds=(p_min, p_max),
+        method="bounded",
+    )
+
+    if not result.success:
+        raise RuntimeError(
+            "Optimization of p failed."
+        )
+
+    return float(result.x)
 
     def negative_objective(p: float) -> float:
         """Negative weighted temporal log-likelihood."""
@@ -611,3 +586,148 @@ def expected_complete_log_likelihood(
         )
 
     return float(value)
+
+def observed_log_likelihood(
+    times: np.ndarray,
+    magnitudes: np.ndarray,
+    *,
+    mu: float,
+    K: float,
+    alpha: float,
+    c: float,
+    p: float,
+    m0: float = 0.0,
+) -> float:
+    """Observed-data log-likelihood for the temporal ETAS model."""
+
+    times = np.asarray(times, dtype=float)
+    magnitudes = np.asarray(magnitudes, dtype=float)
+
+    n = len(times)
+
+    if n < 2:
+        raise ValueError("At least two events are required.")
+
+    if magnitudes.shape != (n,):
+        raise ValueError(
+            "magnitudes must have shape (n_events,)."
+        )
+
+    if np.any(np.diff(times) < 0):
+        raise ValueError(
+            "times must be sorted chronologically."
+        )
+
+    if mu <= 0:
+        raise ValueError("mu must be positive.")
+
+    if K < 0:
+        raise ValueError("K must be non-negative.")
+
+    if c <= 0:
+        raise ValueError("c must be positive.")
+
+    if p <= 0:
+        raise ValueError("p must be positive.")
+
+    duration = times[-1] - times[0]
+
+    if duration <= 0:
+        raise ValueError(
+            "Catalog duration must be positive."
+        )
+
+    # ---------------------------------------------------------
+    # Conditional intensity at every observed event
+    # ---------------------------------------------------------
+
+    dt = times[:, None] - times[None, :]
+
+    valid = np.tril(
+        np.ones((n, n), dtype=bool),
+        k=-1,
+    )
+
+    safe_dt = np.where(valid, dt, 1.0)
+
+    productivity = np.exp(
+        alpha * (magnitudes - m0)
+    )
+
+    triggering = (
+        K
+        * productivity[None, :]
+        / np.power(safe_dt + c, p)
+    )
+
+    triggering = np.where(
+        valid,
+        triggering,
+        0.0,
+    )
+
+    intensity = (
+        mu
+        + triggering.sum(axis=1)
+    )
+
+    if np.any(intensity <= 0):
+        raise ValueError(
+            "ETAS intensity must be positive."
+        )
+
+    log_event_term = np.sum(
+        np.log(intensity)
+    )
+
+    # ---------------------------------------------------------
+    # Integrated background intensity
+    # ---------------------------------------------------------
+
+    integrated_background = (
+        mu * duration
+    )
+
+    # ---------------------------------------------------------
+    # Integrated triggering intensity
+    # ---------------------------------------------------------
+
+    remaining = (
+        times[-1]
+        - times
+        + c
+    )
+
+    if np.isclose(p, 1.0):
+
+        temporal_integral = np.log(
+            remaining / c
+        )
+
+    else:
+
+        temporal_integral = (
+            remaining ** (1.0 - p)
+            - c ** (1.0 - p)
+        ) / (1.0 - p)
+
+    integrated_triggering = (
+        K
+        * np.sum(
+            productivity
+            * temporal_integral
+        )
+    )
+
+    log_likelihood = (
+        log_event_term
+        - integrated_background
+        - integrated_triggering
+    )
+
+    if not np.isfinite(log_likelihood):
+        raise ValueError(
+            "Observed log-likelihood is not finite."
+        )
+
+    return float(log_likelihood)    
