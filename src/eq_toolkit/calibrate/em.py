@@ -16,7 +16,6 @@ from eq_toolkit.calibrate.mstep import (
     update_p,
 )
 
-
 @dataclass
 class EMResult:
     """Result returned by the ETAS EM calibration."""
@@ -27,6 +26,13 @@ class EMResult:
     converged: bool
     rho: np.ndarray
     bg: np.ndarray
+
+    # Full EM history
+    parameter_history: list[ETASParameters]
+    log_likelihood_history: list[float]
+    q_history: list[float]
+    parameter_change_history: list[float]
+    likelihood_improvement_history: list[float]
 
     def validate(self) -> None:
         """Validate the EM result."""
@@ -48,6 +54,31 @@ class EMResult:
                 "converged must be boolean."
             )
 
+        if len(self.parameter_history) != self.iterations:
+            raise ValueError(
+                "parameter_history length must equal iterations."
+            )
+
+        if len(self.log_likelihood_history) != self.iterations:
+            raise ValueError(
+                "log_likelihood_history length must equal iterations."
+            )
+
+        if len(self.q_history) != self.iterations:
+            raise ValueError(
+                "q_history length must equal iterations."
+            )
+
+        if len(self.parameter_change_history) != self.iterations:
+            raise ValueError(
+                "parameter_change_history length must equal iterations."
+            )
+
+        if len(self.likelihood_improvement_history) != self.iterations:
+            raise ValueError(
+                "likelihood_improvement_history length must equal iterations."
+            )
+
         rho = np.asarray(self.rho, dtype=float)
         bg = np.asarray(self.bg, dtype=float)
 
@@ -58,9 +89,7 @@ class EMResult:
             raise ValueError("bg must be a 1-D array.")
 
         if rho.shape[0] != rho.shape[1]:
-            raise ValueError(
-                "rho must be square."
-            )
+            raise ValueError("rho must be square.")
 
         if rho.shape[0] != len(bg):
             raise ValueError(
@@ -68,29 +97,20 @@ class EMResult:
             )
 
         if not np.all(np.isfinite(rho)):
-            raise ValueError(
-                "rho contains non-finite values."
-            )
+            raise ValueError("rho contains non-finite values.")
 
         if not np.all(np.isfinite(bg)):
-            raise ValueError(
-                "bg contains non-finite values."
-            )
+            raise ValueError("bg contains non-finite values.")
 
         if np.any(rho < 0):
-            raise ValueError(
-                "rho cannot contain negative values."
-            )
+            raise ValueError("rho cannot contain negative values.")
 
         if np.any(bg < 0):
-            raise ValueError(
-                "bg cannot contain negative values."
-            )
+            raise ValueError("bg cannot contain negative values.")
 
         # Core E-step invariant:
         #
         # bg[i] + sum_j rho[i, j] = 1
-        #
         row_sums = bg + rho.sum(axis=1)
 
         if not np.allclose(
@@ -102,6 +122,7 @@ class EMResult:
             raise ValueError(
                 "EM result violates probability invariant."
             )
+
 
 
 def check_monotonicity(
@@ -220,6 +241,13 @@ def run_em(
     iterations = 0
     previous_ll = -np.inf
 
+    # Full EM history
+    parameter_history = []
+    log_likelihood_history = []
+    q_history = []
+    parameter_change_history = []
+    likelihood_improvement_history = []
+
 
     for iteration in range(1, max_iterations + 1):
 
@@ -261,10 +289,17 @@ def run_em(
         )
 
         new_alpha = update_alpha(
-            rho,
-            magnitudes,
-            m0=m0,
-        )
+            alpha_old=parameters.alpha,
+            K=parameters.K,
+            p=parameters.p,
+            c=parameters.c,
+            magnitudes=magnitudes,
+            parent_weights=rho.sum(axis=0),
+            M0=m0,
+            times=times,
+            alpha_bounds=(0.0, 5.0),
+       )
+    
 
         new_c = update_c(
             rho,
@@ -305,21 +340,88 @@ def run_em(
         )
 
         # =====================================================
+        # Q-FUNCTION
+        # =====================================================
+
+        q_value = expected_complete_log_likelihood(
+            times,
+            magnitudes,
+            rho,
+            bg,
+            mu=new_parameters.mu,
+            K=new_parameters.K,
+            alpha=new_parameters.alpha,
+            c=new_parameters.c,
+            p=new_parameters.p,
+            m0=m0,
+        )
+
+        # =====================================================
+        # PARAMETER CHANGE
+        # =====================================================
+
+        parameter_change = max(
+            abs(new_parameters.mu - parameters.mu)
+            / max(1.0, abs(parameters.mu)),
+
+            abs(new_parameters.K - parameters.K)
+            / max(1.0, abs(parameters.K)),
+
+            abs(new_parameters.alpha - parameters.alpha)
+            / max(1.0, abs(parameters.alpha)),
+
+            abs(new_parameters.c - parameters.c)
+            / max(1.0, abs(parameters.c)),
+
+            abs(new_parameters.p - parameters.p)
+            / max(1.0, abs(parameters.p)),
+        )
+
+        # =====================================================
+        # LIKELIHOOD IMPROVEMENT
+        # =====================================================
+
+        if iteration == 1:
+            likelihood_improvement = np.nan
+        else:
+            likelihood_improvement = (
+                log_likelihood - previous_ll
+            )
+
+        # Store complete history
+        parameter_history.append(new_parameters)
+        log_likelihood_history.append(log_likelihood)
+        q_history.append(q_value)
+        parameter_change_history.append(parameter_change)
+        likelihood_improvement_history.append(
+            likelihood_improvement
+        )
+
+        # =====================================================
         # CONVERGENCE CHECK
         # =====================================================
 
         if iteration > 1:
-            
 
-            improvement = log_likelihood - previous_ll
-            
+            # -------------------------------------------------
+            # Dual convergence
+            # -------------------------------------------------
 
-            scale = max(
+            ll_scale = max(
                 1.0,
                 abs(previous_ll),
             )
 
-            if abs(improvement) <= tolerance * scale:
+            ll_converged = (
+                abs(likelihood_improvement)
+                <= tolerance * ll_scale
+            )
+
+            parameter_converged = (
+                parameter_change <= tolerance
+            )
+
+            if ll_converged and parameter_converged:
                 parameters = new_parameters
                 iterations = iteration
                 converged = True
@@ -337,7 +439,12 @@ def run_em(
         converged=converged,
         rho=rho,
         bg=bg,
-    )
+        parameter_history=parameter_history,
+        log_likelihood_history=log_likelihood_history,
+        q_history=q_history,
+        parameter_change_history=parameter_change_history,
+        likelihood_improvement_history=likelihood_improvement_history,
+   )
 
     result.validate()
 

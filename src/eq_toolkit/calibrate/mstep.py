@@ -166,108 +166,102 @@ def update_K(
     return float(K)
 
 def update_alpha(
-    rho: np.ndarray,
-    magnitudes: np.ndarray,
-    *,
-    m0: float = 0.0,
-    alpha_bounds: tuple[float, float] = (0.0, 5.0),
-) -> float:
-    """Update the ETAS magnitude-productivity parameter alpha.
+    alpha_old,
+    K,
+    p,
+    c,
+    magnitudes,
+    parent_weights,
+    M0,
+    times,
+    alpha_bounds=(0.0, 5.0),
+):
+    """
+    Update alpha by maximizing the FULL expected complete-data
+    log-likelihood Q(alpha | theta_old).
 
-    The update maximizes the expected triggering log-likelihood
-    contributed by the parent magnitudes.
+    Q(alpha) =
+        sum_j w_j * alpha * (M_j - M0)
+        -
+        K * sum_j exp(alpha * (M_j - M0)) * I_j(c, p)
 
-    Parameters
-    ----------
-    rho[i, j] - probability that event j triggered event i.
-    m0 - Reference magnitude.
-    alpha_bounds - Lower and upper bounds for alpha.
+    where
 
+        w_j = sum_i rho_ij
+
+    and
+
+        I_j(c,p) =
+            integral from t_j to T of
+            (t - t_j + c)^(-p) dt.
+
+    This is the full-objective numerical M-step for alpha.
     """
 
-    rho = np.asarray(rho, dtype=float)
+    from scipy.optimize import minimize_scalar
+    import numpy as np
+
     magnitudes = np.asarray(magnitudes, dtype=float)
+    parent_weights = np.asarray(parent_weights, dtype=float)
+    times = np.asarray(times, dtype=float)
 
-    if rho.ndim != 2:
-        raise ValueError("rho must be a 2-D array.")
+    T = times[-1]
 
-    if magnitudes.ndim != 1:
-        raise ValueError("magnitudes must be a 1-D array.")
+    # Magnitude productivity term
+    delta_m = magnitudes - M0
 
-    n = len(magnitudes)
+    # Integral of temporal triggering kernel
+    dt_end = T - times
 
-    if rho.shape != (n, n):
-        raise ValueError(
-            "rho must have shape (n_events, n_events)."
-        )
+    if p <= 1.0:
+        raise ValueError("p must be > 1 for the finite temporal integral.")
 
-    if n == 0:
-        raise ValueError("magnitudes must contain at least one event.")
+    # I_j(c,p) =
+    # [(dt_end+c)^(1-p) - c^(1-p)] / (1-p)
+    I = (
+        (dt_end + c) ** (1.0 - p)
+        - c ** (1.0 - p)
+    ) / (1.0 - p)
 
-    if not np.all(np.isfinite(rho)):
-        raise ValueError("rho contains non-finite values.")
+    # Full Q(alpha)
+    def objective(alpha):
+        alpha = float(alpha)
 
-    if np.any(rho < 0):
-        raise ValueError("rho cannot contain negative values.")
-
-    if not np.all(np.isfinite(magnitudes)):
-        raise ValueError("magnitudes contain non-finite values.")
-
-    lower, upper = alpha_bounds
-
-    if not np.isfinite(lower) or not np.isfinite(upper):
-        raise ValueError("alpha bounds must be finite.")
-
-    if lower < 0:
-        raise ValueError("alpha lower bound must be non-negative.")
-
-    if lower >= upper:
-        raise ValueError(
-            "alpha lower bound must be smaller than upper bound."
-        )
-
-    # rho[i, j] represents the probability that j triggered i.
-    # Therefore, sum over rows to obtain the expected number of
-    # times each event acts as a parent.
-    parent_weights = rho.sum(axis=0)
-
-    if np.sum(parent_weights) <= 0:
-        # No expected triggered events.
-        # There is no information with which to estimate alpha.
-        return float(lower)
-
-    delta_m = magnitudes - m0
-
-    def negative_objective(alpha: float) -> float:
-        """Negative expected log-productivity."""
-
-        # Expected triggering log-likelihood contribution:
-        # Σ_j w_j [alpha * (M_j - M0)]
-        
-        value = np.sum(
+        productivity_term = np.sum(
             parent_weights * alpha * delta_m
         )
 
-        # We minimize the negative log-likelihood.
-        return -float(value)
-
-    result = minimize_scalar(
-        negative_objective,
-        bounds=(lower, upper),
-        method="bounded",
-    )
-
-    if not result.success or not np.isfinite(result.x):
-        raise ValueError(
-            "Numerical optimization failed while updating alpha."
+        integral_term = K * np.sum(
+            np.exp(alpha * delta_m) * I
         )
 
-    alpha = float(result.x)
+        Q_alpha = productivity_term - integral_term
 
-    if not lower <= alpha <= upper:
-        raise ValueError("Updated alpha is outside its bounds.")
+        # scipy minimizes
+        return -Q_alpha
 
-    return alpha
+    result = minimize_scalar(
+        objective,
+        bounds=alpha_bounds,
+        method="bounded",
+        options={"xatol": 1e-8},
+    )
+
+    if not result.success:
+        raise RuntimeError(
+            f"Alpha optimization failed: {result.message}"
+        )
+
+    alpha_new = float(result.x)
+
+    # Keep result inside requested bounds
+    alpha_new = np.clip(
+        alpha_new,
+        alpha_bounds[0],
+        alpha_bounds[1],
+    )
+
+    return alpha_new
 
 def update_c(
     rho,
