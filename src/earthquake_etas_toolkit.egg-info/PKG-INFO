@@ -8,3 +8,4 @@ Requires-Dist: pandas
 Requires-Dist: matplotlib
 Requires-Dist: scipy
 Requires-Dist: requests
+Requires-Dist: seismostats==1.0.1

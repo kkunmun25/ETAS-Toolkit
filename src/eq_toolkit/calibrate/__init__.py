@@ -19,6 +19,15 @@ from eq_toolkit.calibrate.em import (
     run_em_restarts,
 )
 
+from eq_toolkit.calibrate.uncertainty import (
+    HessianResult,
+    BootstrapResult,
+    UncertaintyResult,
+    compute_hessian_uncertainty,
+    parametric_bootstrap_uncertainty,
+    check_compensator_bug,
+)
+
 __all__ = [
     "EStepResult",
     "compute_estep",
@@ -32,4 +41,10 @@ __all__ = [
     "EMResult",
     "run_em",
     "run_em_restarts",
+    "HessianResult",
+    "BootstrapResult",
+    "UncertaintyResult",
+    "compute_hessian_uncertainty",
+    "parametric_bootstrap_uncertainty",
+    "check_compensator_bug",
 ]

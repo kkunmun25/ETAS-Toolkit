@@ -1998,6 +1998,904 @@ savefig(
 )
 
 
+# ============================================================
+# FIGURE 17
+# LOG-LIKELIHOOD AGAINST EM ITERATION
+# MONOTONE CONVERGENCE
+# ============================================================
+
+ll_history = np.asarray(
+    result.log_likelihood_history,
+    dtype=float
+)
+
+iterations17 = np.arange(
+    1,
+    len(ll_history) + 1
+)
+
+fig, ax = plt.subplots(
+    figsize=(9, 5)
+)
+
+ax.plot(
+    iterations17,
+    ll_history,
+    marker="o",
+    markersize=3,
+    linewidth=1.5,
+    label="Observed log-likelihood"
+)
+
+# Check monotonicity
+ll_diff = np.diff(ll_history)
+
+monotone = np.all(
+    ll_diff >= -1e-8
+)
+
+ax.set_xlabel("EM iteration")
+ax.set_ylabel("Observed log-likelihood")
+ax.set_title(
+    "EM convergence: log-likelihood versus iteration"
+)
+
+ax.grid(alpha=0.25)
+
+ax.legend()
+
+# Add diagnostic text
+ax.text(
+    0.98,
+    0.05,
+    (
+        "Monotone: YES"
+        if monotone
+        else "Monotone: NO"
+    ),
+    transform=ax.transAxes,
+    ha="right",
+    va="bottom",
+    fontsize=10
+)
+
+savefig(
+    fig,
+    17,
+    "Log-likelihood against EM iteration"
+)
+
+print(
+    "\nFigure 17 diagnostic:"
+)
+
+print(
+    "  Number of iterations:",
+    len(ll_history)
+)
+
+print(
+    "  Initial log-likelihood:",
+    ll_history[0]
+)
+
+print(
+    "  Final log-likelihood:",
+    ll_history[-1]
+)
+
+print(
+    "  Monotone non-decreasing:",
+    monotone
+)
+
+
+# ============================================================
+# FIGURE 18
+# PARAMETER TRACES
+# ACROSS ITERATIONS AND MULTIPLE RESTARTS
+# ============================================================
+
+# ------------------------------------------------------------
+# Re-run the same initial parameter sets individually.
+#
+# run_em_restarts() returns only the best result, so for
+# Figure 18 we explicitly run each restart to retain all
+# histories.
+# ------------------------------------------------------------
+
+restart_results = []
+
+for restart_id, start in enumerate(
+    starts,
+    start=1
+):
+
+    print(
+        f"\nFigure 18: running restart {restart_id}..."
+    )
+
+    restart_result = run_em(
+        times,
+        mags,
+        start,
+        m0=M0,
+        max_iterations=30,
+        tolerance=1e-4
+    )
+
+    restart_results.append(
+        restart_result
+    )
+
+
+parameter_names18 = [
+    "mu",
+    "K",
+    "alpha",
+    "c",
+    "p"
+]
+
+fig, axes = plt.subplots(
+    2,
+    3,
+    figsize=(13, 8)
+)
+
+axes = axes.ravel()
+
+for ax, name in zip(
+    axes,
+    parameter_names18
+):
+
+    for restart_id, restart_result in enumerate(
+        restart_results,
+        start=1
+    ):
+
+        values = np.array([
+            getattr(params_i, name)
+            for params_i
+            in restart_result.parameter_history
+        ])
+
+        ax.plot(
+            np.arange(
+                1,
+                len(values) + 1
+            ),
+            values,
+            marker=".",
+            markersize=3,
+            linewidth=1.2,
+            label=f"Restart {restart_id}"
+        )
+
+    ax.set_xlabel(
+        "EM iteration"
+    )
+
+    ax.set_ylabel(
+        name
+    )
+
+    ax.set_title(
+        f"{name} parameter trace"
+    )
+
+    ax.grid(
+        alpha=0.25
+    )
+
+# Remove unused sixth subplot
+if len(axes) > len(parameter_names18):
+
+    for ax in axes[len(parameter_names18):]:
+        ax.axis("off")
+
+axes[0].legend(
+    fontsize=8
+)
+
+savefig(
+    fig,
+    18,
+    "Parameter traces across EM iterations and restarts"
+)
+
+
+print(
+    "\nFigure 18 final values by restart:"
+)
+
+for restart_id, restart_result in enumerate(
+    restart_results,
+    start=1
+):
+
+    p18 = restart_result.parameters
+
+    print(
+        f"\nRestart {restart_id}"
+    )
+
+    print(
+        f"  mu    = {p18.mu:.6g}"
+    )
+
+    print(
+        f"  K     = {p18.K:.6g}"
+    )
+
+    print(
+        f"  alpha = {p18.alpha:.6g}"
+    )
+
+    print(
+        f"  c     = {p18.c:.6g}"
+    )
+
+    print(
+        f"  p     = {p18.p:.6g}"
+    )
+
+    print(
+        f"  LL    = {restart_result.log_likelihood:.6f}"
+    )
+
+
+# ============================================================
+# FIGURE 19
+# SYNTHETIC RECOVERY
+#
+# Known parameters
+#       ↓
+# Generate synthetic catalogs
+#       ↓
+# Run EM
+#       ↓
+# Recover parameters
+#       ↓
+# 95% empirical confidence intervals
+# ============================================================
+
+from scipy.stats import expon
+
+
+def simulate_etas_recovery(
+    duration,
+    mu,
+    K,
+    alpha,
+    M0,
+    c,
+    p,
+    b_value=1.0,
+    nmax=400,
+    seed=1234
+):
+    """
+    Simulate a temporal ETAS catalog for synthetic recovery.
+
+    The magnitude distribution follows a Gutenberg-Richter/
+    exponential distribution above M0.
+
+    This simulator is used ONLY for Figure 19.
+    """
+
+    rng = np.random.default_rng(
+        seed
+    )
+
+    beta = np.log(10.0) * b_value
+
+    # --------------------------------------------------------
+    # Background events
+    # --------------------------------------------------------
+
+    n_background = rng.poisson(
+        max(
+            mu * duration,
+            1e-6
+        )
+    )
+
+    if n_background < 1:
+        n_background = 1
+
+    times_sim = list(
+        rng.uniform(
+            0,
+            duration,
+            n_background
+        )
+    )
+
+    mags_sim = list(
+        M0
+        +
+        rng.exponential(
+            scale=1.0 / beta,
+            size=n_background
+        )
+    )
+
+    # --------------------------------------------------------
+    # Branching process
+    # --------------------------------------------------------
+
+    i = 0
+
+    while (
+        i < len(times_sim)
+        and len(times_sim) < nmax
+    ):
+
+        ti = times_sim[i]
+        mi = mags_sim[i]
+
+        productivity = (
+            K
+            *
+            10.0 ** (
+                alpha
+                *
+                (mi - M0)
+            )
+        )
+
+        n_children = rng.poisson(
+            max(
+                productivity,
+                0.0
+            )
+        )
+
+        for _ in range(
+            n_children
+        ):
+
+            if len(times_sim) >= nmax:
+                break
+
+            u = rng.random()
+
+            if p <= 1.0:
+                break
+
+            delay = (
+                c
+                *
+                (
+                    (1.0 - u)
+                    **
+                    (-1.0 / (p - 1.0))
+                    - 1.0
+                )
+            )
+
+            child_time = (
+                ti + delay
+            )
+
+            if child_time >= duration:
+                continue
+
+            child_mag = (
+                M0
+                +
+                rng.exponential(
+                    scale=1.0 / beta
+                )
+            )
+
+            times_sim.append(
+                child_time
+            )
+
+            mags_sim.append(
+                child_mag
+            )
+
+        i += 1
+
+    order = np.argsort(
+        times_sim
+    )
+
+    times_sim = np.asarray(
+        times_sim
+    )[order]
+
+    mags_sim = np.asarray(
+        mags_sim
+    )[order]
+
+    return (
+        times_sim,
+        mags_sim
+    )
+
+
+# ------------------------------------------------------------
+# Known truth
+#
+# Choose a stable synthetic parameter set.
+# ------------------------------------------------------------
+
+truth = ETASParameters(
+    mu=0.8,
+    K=0.03,
+    alpha=0.8,
+    c=0.01,
+    p=1.30
+)
+
+SYNTHETIC_REPLICATES = 15
+SYNTHETIC_DURATION = 100.0
+SYNTHETIC_NMAX = 300
+
+recovered = {
+    "mu": [],
+    "K": [],
+    "alpha": [],
+    "c": [],
+    "p": []
+}
+
+successful_recoveries = 0
+
+
+print(
+    "\n"
+    + "=" * 60
+)
+
+print(
+    "FIGURE 19: SYNTHETIC PARAMETER RECOVERY"
+)
+
+print(
+    "=" * 60
+)
+
+print(
+    "Known parameters:"
+)
+
+for name in parameter_names18:
+
+    print(
+        f"  {name:6s} = "
+        f"{getattr(truth, name):.6g}"
+    )
+
+
+# ------------------------------------------------------------
+# Use the same EM machinery used for the real data.
+# ------------------------------------------------------------
+
+for replicate in range(
+    SYNTHETIC_REPLICATES
+):
+
+    print(
+        f"Synthetic recovery "
+        f"{replicate + 1}/"
+        f"{SYNTHETIC_REPLICATES}"
+    )
+
+    try:
+
+        syn_t, syn_m = (
+            simulate_etas_recovery(
+                duration=SYNTHETIC_DURATION,
+                mu=truth.mu,
+                K=truth.K,
+                alpha=truth.alpha,
+                M0=M0,
+                c=truth.c,
+                p=truth.p,
+                b_value=1.0,
+                nmax=SYNTHETIC_NMAX,
+                seed=1000 + replicate
+            )
+        )
+
+        # Need enough events for a meaningful fit
+        if len(syn_t) < 30:
+            continue
+
+        # Initial guess deliberately differs
+        # from the truth.
+        syn_start = ETASParameters(
+            mu=max(
+                0.5 * len(syn_t)
+                / max(
+                    syn_t[-1] - syn_t[0],
+                    1e-6
+                ),
+                1e-4
+            ),
+            K=0.05,
+            alpha=0.6,
+            c=0.02,
+            p=1.2
+        )
+
+        syn_result = run_em(
+            syn_t,
+            syn_m,
+            syn_start,
+            m0=M0,
+            max_iterations=40,
+            tolerance=1e-4
+        )
+
+        syn_params = (
+            syn_result.parameters
+        )
+
+        for name in parameter_names18:
+
+            recovered[name].append(
+                getattr(
+                    syn_params,
+                    name
+                )
+            )
+
+        successful_recoveries += 1
+
+    except Exception as exc:
+
+        print(
+            "  Synthetic fit failed:",
+            exc
+        )
+
+
+# ------------------------------------------------------------
+# Calculate empirical 95% confidence intervals
+# ------------------------------------------------------------
+
+recovery_summary = []
+
+for name in parameter_names18:
+
+    values = np.asarray(
+        recovered[name],
+        dtype=float
+    )
+
+    values = values[
+        np.isfinite(values)
+    ]
+
+    if len(values) == 0:
+        median = np.nan
+        lower = np.nan
+        upper = np.nan
+
+    else:
+
+        median = np.median(
+            values
+        )
+
+        lower = np.percentile(
+            values,
+            2.5
+        )
+
+        upper = np.percentile(
+            values,
+            97.5
+        )
+
+    recovery_summary.append(
+        [
+            name,
+            getattr(truth, name),
+            median,
+            lower,
+            upper,
+            len(values)
+        ]
+    )
+
+
+recovery_df = pd.DataFrame(
+    recovery_summary,
+    columns=[
+        "parameter",
+        "true",
+        "median",
+        "lower_95",
+        "upper_95",
+        "n"
+    ]
+)
+
+
+print(
+    "\nSynthetic recovery summary:"
+)
+
+print(
+    recovery_df.to_string(
+        index=False
+    )
+)
+
+
+# ------------------------------------------------------------
+# Plot recovered median + 95% empirical CI
+# ------------------------------------------------------------
+
+fig, ax = plt.subplots(
+    figsize=(10, 6)
+)
+
+x = np.arange(
+    len(parameter_names18)
+)
+
+true_values = np.array([
+    getattr(
+        truth,
+        name
+    )
+    for name in parameter_names18
+])
+
+median_values = (
+    recovery_df["median"]
+    .to_numpy()
+)
+
+lower_values = (
+    recovery_df["lower_95"]
+    .to_numpy()
+)
+
+upper_values = (
+    recovery_df["upper_95"]
+    .to_numpy()
+)
+
+# asymmetric error bars
+lower_error = (
+    median_values
+    -
+    lower_values
+)
+
+upper_error = (
+    upper_values
+    -
+    median_values
+)
+
+ax.errorbar(
+    x,
+    median_values,
+    yerr=[
+        lower_error,
+        upper_error
+    ],
+    fmt="o",
+    capsize=5,
+    markersize=6,
+    label="Recovered median ± 95% CI"
+)
+
+ax.scatter(
+    x,
+    true_values,
+    marker="x",
+    s=70,
+    linewidths=2,
+    label="Known true value"
+)
+
+ax.set_xticks(
+    x
+)
+
+ax.set_xticklabels(
+    parameter_names18
+)
+
+ax.set_ylabel(
+    "Parameter value"
+)
+
+ax.set_xlabel(
+    "ETAS parameter"
+)
+
+ax.set_title(
+    "Synthetic ETAS parameter recovery"
+)
+
+ax.grid(
+    axis="y",
+    alpha=0.25
+)
+
+ax.legend()
+
+savefig(
+    fig,
+    19,
+    "Synthetic recovery with empirical 95 percent confidence intervals"
+)
+
+print(
+    "\nSuccessful synthetic recoveries:",
+    successful_recoveries,
+    "/",
+    SYNTHETIC_REPLICATES
+)
+
+
+# ============================================================
+# FIGURE 20
+# TRANSFORMED-TIME RESIDUALS
+#
+# Correct ETAS point-process fit:
+# transformed inter-event times ~ Exp(1)
+# ============================================================
+
+from eq_toolkit.model.residuals import (
+    transformed_time_residuals,
+    ks_test_residuals
+)
+
+
+residuals20 = (
+    transformed_time_residuals(
+        times,
+        mags,
+        mu=params.mu,
+        K=params.K,
+        alpha=params.alpha,
+        M0=M0,
+        c=params.c,
+        p=params.p
+    )
+)
+
+
+ks_statistic, ks_pvalue = (
+    ks_test_residuals(
+        residuals20
+    )
+)
+
+
+# ------------------------------------------------------------
+# Empirical CDF versus theoretical Exp(1) CDF
+# ------------------------------------------------------------
+
+residuals_sorted = np.sort(
+    residuals20
+)
+
+empirical_cdf = (
+    np.arange(
+        1,
+        len(residuals_sorted) + 1
+    )
+    /
+    len(residuals_sorted)
+)
+
+theoretical_cdf = (
+    1.0
+    -
+    np.exp(
+        -residuals_sorted
+    )
+)
+
+
+fig, ax = plt.subplots(
+    figsize=(8, 6)
+)
+
+ax.plot(
+    residuals_sorted,
+    empirical_cdf,
+    linewidth=1.8,
+    label="Observed transformed residuals"
+)
+
+ax.plot(
+    residuals_sorted,
+    theoretical_cdf,
+    "--",
+    linewidth=1.5,
+    label="Exp(1) theoretical CDF"
+)
+
+ax.set_xlabel(
+    "Transformed inter-event time"
+)
+
+ax.set_ylabel(
+    "Cumulative probability"
+)
+
+ax.set_title(
+    "Ogata transformed-time residual diagnostic"
+)
+
+ax.grid(
+    alpha=0.25
+)
+
+ax.legend()
+
+
+# KS diagnostic displayed directly on figure
+
+ax.text(
+    0.98,
+    0.08,
+    (
+        f"KS statistic = {ks_statistic:.3f}\n"
+        f"p-value = {ks_pvalue:.3f}"
+    ),
+    transform=ax.transAxes,
+    ha="right",
+    va="bottom",
+    bbox=dict(
+        boxstyle="round",
+        facecolor="white",
+        alpha=0.8
+    )
+)
+
+savefig(
+    fig,
+    20,
+    "Transformed-time residual diagnostic"
+)
+
+
+print(
+    "\nFigure 20 residual diagnostic:"
+)
+
+print(
+    "  Number of transformed residuals:",
+    len(residuals20)
+)
+
+print(
+    f"  Mean residual: "
+    f"{np.mean(residuals20):.6f}"
+)
+
+print(
+    f"  Median residual: "
+    f"{np.median(residuals20):.6f}"
+)
+
+print(
+    f"  KS statistic: "
+    f"{ks_statistic:.6f}"
+)
+
+print(
+    f"  KS p-value: "
+    f"{ks_pvalue:.6f}"
+)
+
 
 
 # ============================================================
@@ -2005,10 +2903,10 @@ savefig(
 # ============================================================
 
 print("\n" + "=" * 60)
-print("FIGURES 01-16 COMPLETE")
+print("FIGURES 01-20 COMPLETE")
 print("=" * 60)
 
-for i in range(1, 17):
+for i in range(1, 21):
 
     p = OUT / f"fig{i:02d}.png"
 
